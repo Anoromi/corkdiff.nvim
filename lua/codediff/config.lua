@@ -96,6 +96,11 @@ M.defaults = {
       accept_current = "<leader>co", -- Accept current (ours/right) change
       accept_both = "<leader>cb", -- Accept both changes (incoming first)
       discard = "<leader>cx", -- Discard both, keep base
+      -- Accept all (whole file) - uppercase versions like diffview
+      accept_all_incoming = "<leader>cT", -- Accept ALL incoming changes
+      accept_all_current = "<leader>cO", -- Accept ALL current changes
+      accept_all_both = "<leader>cB", -- Accept ALL both changes
+      discard_all = "<leader>cX", -- Discard ALL, reset to base
       next_conflict = "]x", -- Jump to next conflict
       prev_conflict = "[x", -- Jump to previous conflict
       -- Vimdiff-style numbered diffget (from result buffer)
