@@ -533,11 +533,7 @@ function M.accept_all_incoming(tabpage)
         if count > 0 then
           pcall(vim.cmd, "undojoin")
         end
-        local incoming_lines = tracking.get_lines_for_range(
-          session.original_bufnr,
-          block.output1_range.start_line,
-          block.output1_range.end_line
-        )
+        local incoming_lines = tracking.get_lines_for_range(session.original_bufnr, block.output1_range.start_line, block.output1_range.end_line)
         apply_to_result(result_bufnr, block, incoming_lines, base_lines)
         count = count + 1
       end
@@ -581,11 +577,7 @@ function M.accept_all_current(tabpage)
         if count > 0 then
           pcall(vim.cmd, "undojoin")
         end
-        local current_lines = tracking.get_lines_for_range(
-          session.modified_bufnr,
-          block.output2_range.start_line,
-          block.output2_range.end_line
-        )
+        local current_lines = tracking.get_lines_for_range(session.modified_bufnr, block.output2_range.start_line, block.output2_range.end_line)
         apply_to_result(result_bufnr, block, current_lines, base_lines)
         count = count + 1
       end
@@ -633,16 +625,8 @@ function M.accept_all_both(tabpage, first_input)
           pcall(vim.cmd, "undojoin")
         end
 
-        local incoming_lines = tracking.get_lines_for_range(
-          session.original_bufnr,
-          block.output1_range.start_line,
-          block.output1_range.end_line
-        )
-        local current_lines = tracking.get_lines_for_range(
-          session.modified_bufnr,
-          block.output2_range.start_line,
-          block.output2_range.end_line
-        )
+        local incoming_lines = tracking.get_lines_for_range(session.original_bufnr, block.output1_range.start_line, block.output1_range.end_line)
+        local current_lines = tracking.get_lines_for_range(session.modified_bufnr, block.output2_range.start_line, block.output2_range.end_line)
 
         -- Combine both sides
         local combined
