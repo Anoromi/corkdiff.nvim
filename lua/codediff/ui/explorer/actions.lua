@@ -3,12 +3,7 @@ local M = {}
 
 local config = require("codediff.config")
 local git = require("codediff.core.git")
-
--- Will be injected by init.lua
-local refresh_module = nil
-M._set_refresh_module = function(r)
-  refresh_module = r
-end
+local refresh_module = require("codediff.ui.explorer.refresh")
 
 -- Find line number for a file node by scanning the tree
 -- Returns the line number or nil if not found

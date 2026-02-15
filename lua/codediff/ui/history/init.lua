@@ -31,7 +31,4 @@ local refresh = require("codediff.ui.history.refresh")
 M.refresh = refresh.refresh
 M.setup_auto_refresh = refresh.setup_auto_refresh
 
--- Wire up cross-module dependency
-refresh._set_render_module(render)
-
 return M

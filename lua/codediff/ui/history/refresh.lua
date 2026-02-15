@@ -2,12 +2,7 @@
 local M = {}
 
 local git = require("codediff.core.git")
-
--- Will be injected to avoid circular require
-local render_module = nil
-M._set_render_module = function(r)
-  render_module = r
-end
+local render_module = require("codediff.ui.history.render")
 
 -- Setup auto-refresh triggers for history panel
 -- Returns a cleanup function that should be called when the history is destroyed
