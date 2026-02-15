@@ -96,6 +96,7 @@ end
 function M.create(commits, git_root, tabpage, width, opts)
   opts = opts or {}
   local base_revision = opts.base_revision
+  local line_range = opts.line_range
 
   -- Get history panel position and size from config (separate from explorer)
   local history_config = config.options.history or {}
@@ -292,6 +293,7 @@ function M.create(commits, git_root, tabpage, width, opts)
         modified_path = file_path,
         original_revision = target_hash,
         modified_revision = commit_hash,
+        line_range = line_range,
       }
       view.update(tabpage, session_config, true)
     end)
