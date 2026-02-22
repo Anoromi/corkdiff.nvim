@@ -80,10 +80,14 @@ describe("Virtual buffer LSP prevention", function()
     assert.are.equal("", vim.bo[buf].filetype,
       "filetype should be empty on virtual buffer")
 
-    -- 4. TreeSitter should be active (highlighting works without filetype)
-    local ok, parser = pcall(vim.treesitter.get_parser, buf)
-    assert.is_true(ok and parser ~= nil,
-      "TreeSitter parser should be active on virtual buffer")
+    -- 4. TreeSitter should be active if parser is available
+    -- (CI environments may not have all TreeSitter parsers installed)
+    local has_parser = pcall(vim.treesitter.language.inspect, "javascript")
+    if has_parser then
+      local ok, parser = pcall(vim.treesitter.get_parser, buf)
+      assert.is_true(ok and parser ~= nil,
+        "TreeSitter parser should be active on virtual buffer")
+    end
 
     -- 5. buftype should be nowrite
     assert.are.equal("nowrite", vim.bo[buf].buftype,
