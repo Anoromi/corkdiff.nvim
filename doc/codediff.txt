@@ -235,6 +235,22 @@ Customization examples:
   }
 <
 
+Explorer & history git status highlights (customizable):
+
+- CodeDiffStatusAdded       Added files (links to DiagnosticOk)
+- CodeDiffStatusModified    Modified files (links to DiagnosticWarn)
+- CodeDiffStatusDeleted     Deleted files (links to DiagnosticError)
+- CodeDiffStatusRenamed     Renamed files (links to DiagnosticInfo)
+- CodeDiffStatusUntracked   Untracked files (links to DiagnosticInfo)
+- CodeDiffStatusConflict    Conflicting files (links to DiagnosticError)
+- CodeDiffExplorerSelected  Selected file background (links to Visual)
+
+Override in your config or colorscheme:
+>lua
+  vim.api.nvim_set_hl(0, "CodeDiffStatusModified", { fg = "#e2c08d" })
+  vim.api.nvim_set_hl(0, "CodeDiffStatusAdded", { fg = "#3fb950" })
+<
+
 ==============================================================================
 LUA API                                                   *codediff-lua-api*
 

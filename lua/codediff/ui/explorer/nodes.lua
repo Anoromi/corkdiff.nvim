@@ -25,11 +25,11 @@ local MERGE_ARTIFACT_PATTERNS = {
 
 -- Status symbols and colors
 local STATUS_SYMBOLS = {
-  M = { symbol = "M", color = "DiagnosticWarn" },
-  A = { symbol = "A", color = "DiagnosticOk" },
-  D = { symbol = "D", color = "DiagnosticError" },
-  ["??"] = { symbol = "??", color = "DiagnosticInfo" },
-  ["!"] = { symbol = "!", color = "DiagnosticError" }, -- Merge conflict
+  M = { symbol = "M", color = "CodeDiffStatusModified" },
+  A = { symbol = "A", color = "CodeDiffStatusAdded" },
+  D = { symbol = "D", color = "CodeDiffStatusDeleted" },
+  ["??"] = { symbol = "??", color = "CodeDiffStatusUntracked" },
+  ["!"] = { symbol = "!", color = "CodeDiffStatusConflict" },
 }
 
 -- Indent marker characters (neo-tree style)
