@@ -89,7 +89,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       original_position = "left",         -- Position of original (old) content: "left" or "right"
       conflict_ours_position = "right",   -- Position of ours (:2) in conflict view: "left" or "right"
       conflict_result_position = "bottom", -- "bottom" (default): result below diff panes or "center": result between diff panes (three columns)
-      conflict_result_height = 30,         -- Height of result pane in bottom layout (% of total height, min 10 lines)
+      conflict_result_height = 30,         -- Height of result pane in bottom layout (% of total height)
       conflict_result_width_ratio = { 1, 1, 1 }, -- Width ratio for center layout panes {left, center, right} (e.g., {1, 2, 1} for wider result)
       cycle_next_hunk = true,             -- Wrap around when navigating hunks (]c/[c): false to stop at first/last
       cycle_next_file = true,             -- Wrap around when navigating files (]f/[f): false to stop at first/last

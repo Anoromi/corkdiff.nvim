@@ -413,8 +413,10 @@ function M.create(session_config, filetype, on_ready)
 
     -- Adjust diff window sizes based on explorer position
     if position == "bottom" then
-      -- For bottom position, diff windows take full width, equalize them
       vim.cmd("wincmd =")
+      if explorer_obj and explorer_obj.winid and vim.api.nvim_win_is_valid(explorer_obj.winid) then
+        vim.api.nvim_win_set_height(explorer_obj.winid, explorer_config.height or 15)
+      end
     else
       -- For left position, calculate remaining width and split equally
       local total_width = vim.o.columns
@@ -458,6 +460,9 @@ function M.create(session_config, filetype, on_ready)
     -- Adjust diff window sizes based on panel position
     if position == "bottom" then
       vim.cmd("wincmd =")
+      if history_obj and history_obj.winid and vim.api.nvim_win_is_valid(history_obj.winid) then
+        vim.api.nvim_win_set_height(history_obj.winid, history_config.height or 15)
+      end
     else
       local total_width = vim.o.columns
       local panel_width = history_config.width or 40

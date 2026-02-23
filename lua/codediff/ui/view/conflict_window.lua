@@ -16,7 +16,8 @@ local function create_bottom_layout(modified_win, original_win)
 
   vim.fn.win_splitmove(original_win, modified_win, { vertical = true, rightbelow = false })
 
-  vim.api.nvim_win_set_height(result_win, math.max(10, math.floor(vim.o.lines * config.options.diff.conflict_result_height / 100)))
+  local pct = math.min(90, math.max(10, config.options.diff.conflict_result_height))
+  vim.api.nvim_win_set_height(result_win, math.floor(vim.o.lines * pct / 100))
 
   return result_win
 end
@@ -34,20 +35,19 @@ local function create_center_layout(modified_win, original_win)
   local scratch = vim.api.nvim_create_buf(false, true)
   local result_win = vim.api.nvim_open_win(scratch, true, { split = "right", win = left_win })
 
-  local ratio = config.options.diff.conflict_result_width_ratio
-  local total_parts = ratio[1] + ratio[2] + ratio[3]
-  local left_width = math.floor(vim.o.columns * ratio[1] / total_parts)
-  local center_width = math.floor(vim.o.columns * ratio[2] / total_parts)
-  local right_width = vim.o.columns - left_width - center_width
+  local r = config.options.diff.conflict_result_width_ratio
+  local total = r[1] + r[2] + r[3]
+  local lw = math.floor(vim.o.columns * r[1] / total)
+  local cw = math.floor(vim.o.columns * r[2] / total)
 
   if left_win == original_win then
-    vim.api.nvim_win_set_width(original_win, left_width)
-    vim.api.nvim_win_set_width(result_win, center_width)
-    vim.api.nvim_win_set_width(modified_win, right_width)
+    vim.api.nvim_win_set_width(original_win, lw)
+    vim.api.nvim_win_set_width(result_win, cw)
+    vim.api.nvim_win_set_width(modified_win, vim.o.columns - lw - cw)
   else
-    vim.api.nvim_win_set_width(modified_win, left_width)
-    vim.api.nvim_win_set_width(result_win, center_width)
-    vim.api.nvim_win_set_width(original_win, right_width)
+    vim.api.nvim_win_set_width(modified_win, lw)
+    vim.api.nvim_win_set_width(result_win, cw)
+    vim.api.nvim_win_set_width(original_win, vim.o.columns - lw - cw)
   end
 
   return result_win
