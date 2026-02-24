@@ -711,13 +711,34 @@ end
 -- Restore/discard changes to a file (git checkout -- or git restore)
 -- git_root: absolute path to git repository root
 -- rel_path: relative path from git root
+-- source: optional revision to restore from (e.g. commit hash, "origin/HEAD")
 -- callback: function(err)
-function M.restore_file(git_root, rel_path, callback)
+function M.restore_file(git_root, rel_path, source, callback)
+  -- Support old 3-arg signature: restore_file(git_root, rel_path, callback)
+  if type(source) == "function" then
+    callback = source
+    source = nil
+  end
+
   -- git restore is preferred (Git 2.23+), fallback to checkout
-  run_git_async({ "restore", "--", rel_path }, { cwd = git_root }, function(err, _)
+  local restore_args = { "restore" }
+  if source then
+    table.insert(restore_args, "--source=" .. source)
+  end
+  table.insert(restore_args, "--")
+  table.insert(restore_args, rel_path)
+
+  run_git_async(restore_args, { cwd = git_root }, function(err, _)
     if err then
       -- Fallback to git checkout for older git versions
-      run_git_async({ "checkout", "--", rel_path }, { cwd = git_root }, function(err2, _)
+      local checkout_args = { "checkout" }
+      if source then
+        table.insert(checkout_args, source)
+      end
+      table.insert(checkout_args, "--")
+      table.insert(checkout_args, rel_path)
+
+      run_git_async(checkout_args, { cwd = git_root }, function(err2, _)
         if err2 then
           callback("Failed to restore file: " .. err2)
         else

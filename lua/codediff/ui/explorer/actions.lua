@@ -389,7 +389,7 @@ function M.restore_entry(explorer, tree)
     elseif is_directory then
       -- Directory may contain both tracked and untracked files
       -- Run git restore for tracked changes, then git clean for untracked
-      git.restore_file(explorer.git_root, entry_path, function(restore_err)
+      git.restore_file(explorer.git_root, entry_path, explorer.base_revision, function(restore_err)
         git.delete_untracked(explorer.git_root, entry_path, function(clean_err)
           if restore_err and clean_err then
             vim.schedule(function()
@@ -400,7 +400,7 @@ function M.restore_entry(explorer, tree)
       end)
     else
       -- Restore tracked file
-      git.restore_file(explorer.git_root, entry_path, function(err)
+      git.restore_file(explorer.git_root, entry_path, explorer.base_revision, function(err)
         if err then
           vim.schedule(function()
             vim.notify(err, vim.log.levels.ERROR)
