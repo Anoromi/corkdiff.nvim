@@ -27,6 +27,9 @@ local setup_auto_refresh = render.setup_auto_refresh
 local setup_conflict_result_window = conflict_window.setup_conflict_result_window
 local setup_all_keymaps = view_keymaps.setup_all_keymaps
 
+-- Once-guard: register lifecycle autocmds on first view creation
+local lifecycle_initialized = false
+
 ---@class SessionConfig
 ---@field mode "standalone"|"explorer"|"history"
 ---@field git_root string?
@@ -44,6 +47,12 @@ local setup_all_keymaps = view_keymaps.setup_all_keymaps
 ---@param on_ready? function Optional callback when view is fully ready (for sync callers)
 ---@return table|nil Result containing diff metadata, or nil if deferred
 function M.create(session_config, filetype, on_ready)
+  -- Initialize lifecycle autocmds on first use
+  if not lifecycle_initialized then
+    lifecycle.setup()
+    lifecycle_initialized = true
+  end
+
   -- Create new tab (both modes create a tab)
   vim.cmd("tabnew")
 
