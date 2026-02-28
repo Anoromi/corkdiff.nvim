@@ -21,6 +21,7 @@ end
 
 describe("Virtual buffer diagnostics integration", function()
   before_each(function()
+    require("codediff").setup({ diff = { layout = "side-by-side" } })
     virtual_file.setup()
     setup_command()
   end)

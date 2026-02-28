@@ -22,6 +22,7 @@ describe("Explorer Mode", function()
   local original_cwd
 
   before_each(function()
+    require("codediff").setup({ diff = { layout = "side-by-side" } })
     -- Setup command
     setup_command()
     

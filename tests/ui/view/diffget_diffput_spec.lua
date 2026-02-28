@@ -64,6 +64,7 @@ end
 
 describe("Diffget/Diffput", function()
   before_each(function()
+    require("codediff").setup({ diff = { layout = "side-by-side" } })
     highlights.setup()
   end)
 
