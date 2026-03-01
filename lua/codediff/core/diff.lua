@@ -240,14 +240,21 @@ function M.compute_diff(original_lines, modified_lines, options)
   local c_orig, orig_count = lua_to_c_strings(original_lines)
   local c_mod, mod_count = lua_to_c_strings(modified_lines)
 
+  -- Helper: resolve a boolean option where explicit false must win over defaults
+  local function bool_opt(explicit, fallback)
+    if explicit ~= nil then return explicit end
+    if fallback ~= nil then return fallback end
+    return false
+  end
+
   -- Create options struct (explicit options override config defaults)
   ---@type DiffOptions
   ---@diagnostic disable-next-line: assign-type-mismatch
   local c_options = ffi.new("DiffOptions")
-  c_options.ignore_trim_whitespace = options.ignore_trim_whitespace or diff_config.ignore_trim_whitespace or false
+  c_options.ignore_trim_whitespace = bool_opt(options.ignore_trim_whitespace, diff_config.ignore_trim_whitespace)
   c_options.max_computation_time_ms = options.max_computation_time_ms or diff_config.max_computation_time_ms or 5000
-  c_options.compute_moves = options.compute_moves or diff_config.compute_moves or false
-  c_options.extend_to_subwords = options.extend_to_subwords or false
+  c_options.compute_moves = bool_opt(options.compute_moves, diff_config.compute_moves)
+  c_options.extend_to_subwords = bool_opt(options.extend_to_subwords, nil)
 
   -- Call C function
   local c_diff = lib.compute_diff(c_orig, orig_count, c_mod, mod_count, c_options)
