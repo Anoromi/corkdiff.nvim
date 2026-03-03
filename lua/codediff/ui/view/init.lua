@@ -10,7 +10,9 @@ local lifecycle_initialized = false
 
 -- Resolve effective layout: conflict always uses side-by-side
 local function get_layout(session_config)
-  if session_config.conflict then return "side-by-side" end
+  if session_config.conflict then
+    return "side-by-side"
+  end
   return config.options.diff.layout
 end
 

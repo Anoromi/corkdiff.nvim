@@ -745,8 +745,12 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
 
   local function align_move()
     local session = lifecycle.get_session(tabpage)
-    if not session or not session.stored_diff_result or not session.stored_diff_result.moves then return end
-    if is_inline then return end -- Only works in side-by-side
+    if not session or not session.stored_diff_result or not session.stored_diff_result.moves then
+      return
+    end
+    if is_inline then
+      return
+    end -- Only works in side-by-side
 
     local moves = session.stored_diff_result.moves
     if #moves == 0 then
@@ -779,14 +783,20 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
 
     local current_win = vim.api.nvim_get_current_win()
     local other_win = is_on_original and session.modified_win or session.original_win
-    if not vim.api.nvim_win_is_valid(other_win) then return end
+    if not vim.api.nvim_win_is_valid(other_win) then
+      return
+    end
 
     local my_range = is_on_original and current_move.original or current_move.modified
     local other_range = is_on_original and current_move.modified or current_move.original
 
     -- Save full view state of both windows
-    local current_view = vim.api.nvim_win_call(current_win, function() return vim.fn.winsaveview() end)
-    local other_view = vim.api.nvim_win_call(other_win, function() return vim.fn.winsaveview() end)
+    local current_view = vim.api.nvim_win_call(current_win, function()
+      return vim.fn.winsaveview()
+    end)
+    local other_view = vim.api.nvim_win_call(other_win, function()
+      return vim.fn.winsaveview()
+    end)
     local saved_scrollbind_current = vim.wo[current_win].scrollbind
     local saved_scrollbind_other = vim.wo[other_win].scrollbind
 
@@ -828,15 +838,21 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     local restored = false
 
     local function restore()
-      if restored then return end
+      if restored then
+        return
+      end
       restored = true
       pcall(vim.api.nvim_del_augroup_by_id, augroup)
       if not vim.api.nvim_win_is_valid(current_win) or not vim.api.nvim_win_is_valid(other_win) then
         return
       end
       -- Restore views first (before scrollbind)
-      vim.api.nvim_win_call(other_win, function() vim.fn.winrestview(other_view) end)
-      vim.api.nvim_win_call(current_win, function() vim.fn.winrestview(current_view) end)
+      vim.api.nvim_win_call(other_win, function()
+        vim.fn.winrestview(other_view)
+      end)
+      vim.api.nvim_win_call(current_win, function()
+        vim.fn.winrestview(current_view)
+      end)
       -- Use the same anchor technique as initial render to establish scrollbind
       local sess = lifecycle.get_session(tabpage)
       local orig_win = sess and sess.original_win or current_win
@@ -879,6 +895,5 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     lifecycle.set_tab_keymap(tabpage, "n", keymaps.align_move, align_move, { desc = "Align moved code block" })
   end
 end
-
 
 return M

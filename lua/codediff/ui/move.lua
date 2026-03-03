@@ -70,15 +70,23 @@ end
 -- ============================================================================
 
 local function get_sign(line, first, last)
-  if first == last then return "─" end
-  if line == first then return "┌" end
-  if line == last then return "└" end
+  if first == last then
+    return "─"
+  end
+  if line == first then
+    return "┌"
+  end
+  if line == last then
+    return "└"
+  end
   return "│"
 end
 
 local function highlight_moved_lines(bufnr, first, last, line_count)
   for line = first, last do
-    if line > line_count then break end
+    if line > line_count then
+      break
+    end
     local line_idx = line - 1
     local sign = get_sign(line, first, last)
     -- Range extmark for highlight (overrides diff highlight at priority 250)
@@ -159,9 +167,7 @@ local function place_annotation(ann_bufnr, filler_bufnr, ann_line, label, change
     priority = 250,
   })
 
-  local filler_anchor, filler_above = compute_filler_position(
-    ann_line, change, is_orig_side, changes, filler_line_count
-  )
+  local filler_anchor, filler_above = compute_filler_position(ann_line, change, is_orig_side, changes, filler_line_count)
   pcall(vim.api.nvim_buf_set_extmark, filler_bufnr, ns_filler, filler_anchor, 0, {
     virt_lines = { { { string.rep("╱", 500), "CodeDiffFiller" } } },
     virt_lines_above = filler_above,

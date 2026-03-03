@@ -86,14 +86,18 @@ function M.compute_syntax_highlights(lines, filetype)
     -- Handle single-line captures
     if r1 == r2 then
       local line_num = r1 + 1 -- 1-based
-      if not result[line_num] then result[line_num] = {} end
+      if not result[line_num] then
+        result[line_num] = {}
+      end
       table.insert(result[line_num], { start_col = c1 + 1, end_col = c2, hl_group = hl_group })
     else
       -- Multi-line capture: split across lines
       for row = r1, r2 do
         local line_num = row + 1
         local line_text = lines[line_num] or ""
-        if not result[line_num] then result[line_num] = {} end
+        if not result[line_num] then
+          result[line_num] = {}
+        end
 
         local sc = (row == r1) and (c1 + 1) or 1
         local ec = (row == r2) and c2 or #line_text
@@ -106,7 +110,9 @@ function M.compute_syntax_highlights(lines, filetype)
 
   -- Sort each line's highlights by start_col
   for _, line_hls in pairs(result) do
-    table.sort(line_hls, function(a, b) return a.start_col < b.start_col end)
+    table.sort(line_hls, function(a, b)
+      return a.start_col < b.start_col
+    end)
   end
 
   return result
@@ -425,7 +431,6 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
         virt_lines_above = true,
         priority = highlight_priority,
       })
-
     end
 
     -- Step 2: Highlight added/modified lines on the real buffer
@@ -453,8 +458,6 @@ function M.render_inline_diff(bufnr, diff_result, original_lines, modified_lines
       apply_modified_char_highlights(bufnr, mapping.inner_changes, modified_lines)
     end
   end
-
-
 end
 
 -- ============================================================================

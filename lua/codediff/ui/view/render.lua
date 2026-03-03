@@ -138,12 +138,7 @@ function M.compute_and_render(
     end
 
     -- Step 3: Establish scrollbind with anchor technique, then restore cursors
-    M.establish_scrollbind(
-      original_win, modified_win,
-      original_buf, modified_buf,
-      lines_diff,
-      orig_cursor, mod_cursor
-    )
+    M.establish_scrollbind(original_win, modified_win, original_buf, modified_buf, lines_diff, orig_cursor, mod_cursor)
 
     -- Step 4: Center view on first hunk for initial open
     if auto_scroll_to_first_hunk and #lines_diff.changes > 0 then

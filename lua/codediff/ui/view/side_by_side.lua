@@ -692,7 +692,9 @@ end
 ---@param opts { keep: "original"|"modified", load_bufnr: number, original_path: string, modified_path: string, original_revision: string?, modified_revision: string? }
 local function show_single_file(tabpage, opts)
   local session = lifecycle.get_session(tabpage)
-  if not session then return end
+  if not session then
+    return
+  end
 
   local orig_win, mod_win = lifecycle.get_windows(tabpage)
   local highlights = require("codediff.ui.highlights")
