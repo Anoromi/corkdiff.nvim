@@ -25,6 +25,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
   - Deep/dark character-level highlights showing exact changes within lines
 - **Side-by-side diff view** in a new tab with synchronized scrolling
 - **Inline (unified) diff view** — single-window layout with deleted lines as virtual overlays, with treesitter syntax highlighting
+- **Toggle layout** — switch between side-by-side and inline layout at runtime with `t`
 - **Git integration**: Compare between any git revision (HEAD, commits, branches, tags)
 - **Same implementation as VSCode's diff engine**, providing identical visual highlighting for most scenarios
 - **Fast C-based diff computation** using FFI with **multi-core parallelization** (OpenMP)
@@ -155,6 +156,7 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         hunk_textobject = "ih",      -- Textobject for hunk (vih to select, yih to yank, etc.)
         show_help = "g?",   -- Show floating window with available keymaps
         align_move = "gm", -- Temporarily align moved code blocks across panes
+        toggle_layout = "t", -- Toggle between side-by-side and inline layout
       },
       explorer = {
         select = "<CR>",    -- Open diff for selected file
