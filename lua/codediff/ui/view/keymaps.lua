@@ -70,7 +70,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return nil, nil
     end
     local diff_result = session.stored_diff_result
-    if #diff_result.changes == 0 then
+    if not diff_result.changes or #diff_result.changes == 0 then
       return nil, nil
     end
 
