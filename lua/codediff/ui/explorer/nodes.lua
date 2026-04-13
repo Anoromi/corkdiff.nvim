@@ -28,6 +28,7 @@ local STATUS_SYMBOLS = {
   M = { symbol = "M", color = "CodeDiffStatusModified" },
   A = { symbol = "A", color = "CodeDiffStatusAdded" },
   D = { symbol = "D", color = "CodeDiffStatusDeleted" },
+  R = { symbol = "R", color = "CodeDiffStatusRenamed" },
   ["??"] = { symbol = "??", color = "CodeDiffStatusUntracked" },
   ["!"] = { symbol = "!", color = "CodeDiffStatusConflict" },
 }
@@ -75,6 +76,165 @@ function M.get_file_icon(path)
   return "", nil
 end
 
+function M.get_status_display(status)
+  local info = STATUS_SYMBOLS[status]
+  if info then
+    return info.symbol, info.color
+  end
+  return status or "", "Normal"
+end
+
+function M.get_selected_highlight(base_hl_name, selection_hl_name)
+  local selection_hl = selection_hl_name or "CodeDiffExplorerSelected"
+  local sel_hl = vim.api.nvim_get_hl(0, { name = selection_hl, link = false })
+  local selected_bg = sel_hl.bg
+  if not selected_bg then
+    return base_hl_name or "Normal"
+  end
+
+  local resolved_base = base_hl_name or "Normal"
+  local combined_name = (selection_hl .. "_" .. resolved_base):gsub("[^%w]", "_")
+  local base_hl = vim.api.nvim_get_hl(0, { name = resolved_base, link = false })
+
+  vim.api.nvim_set_hl(0, combined_name, {
+    fg = base_hl.fg,
+    bg = selected_bg,
+    bold = base_hl.bold,
+    italic = base_hl.italic,
+    underline = base_hl.underline,
+    strikethrough = base_hl.strikethrough,
+  })
+
+  return combined_name
+end
+
+function M.build_file_display_parts(path, max_width, opts)
+  opts = opts or {}
+  local full_path = path or ""
+  local filename = full_path:match("([^/]+)$") or full_path
+  local directory = full_path:sub(1, -(#filename + 1))
+  local suffix = opts.suffix or ""
+
+  local filename_len = vim.fn.strdisplaywidth(filename)
+  local suffix_len = vim.fn.strdisplaywidth(suffix)
+  local available = math.max(max_width - filename_len - suffix_len, 0)
+
+  if #directory == 0 or available <= 0 then
+    return {
+      filename = filename,
+      directory = "",
+      suffix = suffix,
+    }
+  end
+
+  local space_len = 1
+  local directory_len = vim.fn.strdisplaywidth(directory)
+  if directory_len + space_len <= available then
+    return {
+      filename = filename,
+      directory = directory,
+      suffix = suffix,
+    }
+  end
+
+  local available_for_dir = available - space_len
+  if available_for_dir <= 3 then
+    return {
+      filename = filename,
+      directory = "",
+      suffix = suffix,
+    }
+  end
+
+  local ellipsis = "..."
+  local chars_to_keep = available_for_dir - vim.fn.strdisplaywidth(ellipsis)
+  local byte_pos = 0
+  local accumulated_width = 0
+  for char in vim.gsplit(directory, "") do
+    if char ~= "" then
+      local char_width = vim.fn.strdisplaywidth(char)
+      if accumulated_width + char_width > chars_to_keep then
+        break
+      end
+      accumulated_width = accumulated_width + char_width
+      byte_pos = byte_pos + #char
+    end
+  end
+
+  return {
+    filename = filename,
+    directory = byte_pos > 0 and (directory:sub(1, byte_pos) .. ellipsis) or "",
+    suffix = suffix,
+  }
+end
+
+function M.prepare_flat_file_line(file_data, max_width, opts)
+  opts = opts or {}
+  local line = Line()
+  local is_selected = opts.selected == true
+  local selection_hl = opts.selection_hl or "CodeDiffExplorerSelected"
+  local name_hl = opts.filename_hl or "Normal"
+  local path_hl = opts.path_hl or "ExplorerDirectorySmall"
+  local normal_hl = opts.normal_hl or "Normal"
+
+  local function get_hl(base_hl)
+    if not is_selected then
+      return base_hl or normal_hl
+    end
+    return M.get_selected_highlight(base_hl or normal_hl, selection_hl)
+  end
+
+  local icon, icon_color = M.get_file_icon(file_data.path)
+  local status_symbol, status_hl = M.get_status_display(file_data.status)
+
+  local icon_part = icon ~= "" and (icon .. " ") or ""
+  line:append(" ", get_hl(normal_hl))
+  if #icon_part > 0 then
+    line:append(icon_part, get_hl(icon_color))
+  end
+
+  local suffix = ""
+  if file_data.old_path and file_data.old_path ~= file_data.path then
+    local current_name = (file_data.path or ""):match("([^/]+)$") or (file_data.path or "")
+    local old_name = file_data.old_path:match("([^/]+)$") or file_data.old_path
+    local old_dir = file_data.old_path:sub(1, -(#old_name + 1))
+    if old_name ~= current_name then
+      suffix = " <- " .. old_name
+      if #old_dir > 0 then
+        suffix = suffix .. " " .. old_dir
+      end
+    elseif #old_dir > 0 then
+      suffix = " <- " .. old_dir
+    else
+      suffix = " <- " .. file_data.old_path
+    end
+  end
+
+  local used_width = 1 + vim.fn.strdisplaywidth(icon_part)
+  local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 2
+  local available_for_content = math.max(max_width - used_width - status_reserve, 0)
+  local parts = M.build_file_display_parts(file_data.path, available_for_content, { suffix = suffix })
+
+  line:append(parts.filename, get_hl(name_hl))
+  if #parts.directory > 0 then
+    line:append(" ", get_hl(normal_hl))
+    line:append(parts.directory, get_hl(path_hl))
+  end
+  if #parts.suffix > 0 then
+    line:append(" ", get_hl(normal_hl))
+    line:append(parts.suffix, get_hl(path_hl))
+  end
+
+  local content_len = vim.fn.strdisplaywidth(parts.filename)
+    + (#parts.directory > 0 and (1 + vim.fn.strdisplaywidth(parts.directory)) or 0)
+    + (#parts.suffix > 0 and (1 + vim.fn.strdisplaywidth(parts.suffix)) or 0)
+  local padding_needed = math.max(available_for_content - content_len + 1, 1)
+  line:append(string.rep(" ", padding_needed), get_hl(normal_hl))
+  line:append(status_symbol, get_hl(status_hl))
+
+  return line
+end
+
 -- Folder icon (configurable via config, with nerd font defaults)
 function M.get_folder_icon(is_open)
   local explorer_config = config.options.explorer or {}
@@ -92,7 +252,7 @@ function M.create_file_nodes(files, git_root, group)
   local nodes = {}
   for _, file in ipairs(files) do
     local icon, icon_color = M.get_file_icon(file.path)
-    local status_info = STATUS_SYMBOLS[file.status] or { symbol = file.status, color = "Normal" }
+    local status_symbol, status_color = M.get_status_display(file.status)
 
     nodes[#nodes + 1] = Tree.Node({
       text = file.path,
@@ -102,8 +262,8 @@ function M.create_file_nodes(files, git_root, group)
         old_path = file.old_path, -- For renames: original path before rename
         icon = icon,
         icon_color = icon_color,
-        status_symbol = status_info.symbol,
-        status_color = status_info.color,
+        status_symbol = status_symbol,
+        status_color = status_color,
         git_root = git_root,
         group = group,
       },
@@ -215,7 +375,7 @@ function M.create_tree_file_nodes(files, git_root, group)
         -- File node
         local file = item._file
         local icon, icon_color = M.get_file_icon(file.path)
-        local status_info = STATUS_SYMBOLS[file.status] or { symbol = file.status, color = "Normal" }
+        local status_symbol, status_color = M.get_status_display(file.status)
 
         nodes[#nodes + 1] = Tree.Node({
           text = key,
@@ -225,8 +385,8 @@ function M.create_tree_file_nodes(files, git_root, group)
             old_path = file.old_path,
             icon = icon,
             icon_color = icon_color,
-            status_symbol = status_info.symbol,
-            status_color = status_info.color,
+            status_symbol = status_symbol,
+            status_color = status_color,
             git_root = git_root,
             group = group,
             indent_state = node_indent_state,
@@ -295,30 +455,11 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
   else
     -- Match both path AND group to handle files in both staged and unstaged
     local is_selected = data.path and data.path == selected_path and data.group == selected_group
-
-    -- Get selected background color once
-    local selected_bg = nil
-    if is_selected then
-      local sel_hl = vim.api.nvim_get_hl(0, { name = "CodeDiffExplorerSelected", link = false })
-      selected_bg = sel_hl.bg
-    end
-
-    -- Helper to get highlight with selected background but original foreground
-    local function get_hl(default)
+    local function get_hl(base_hl)
       if not is_selected then
-        return default or "Normal"
+        return base_hl or "Normal"
       end
-      -- Create a combined highlight: original fg + selected bg
-      local base_hl_name = default or "Normal"
-      local combined_name = "CodeDiffExplorerSel_" .. base_hl_name:gsub("[^%w]", "_")
-
-      -- Get foreground from base highlight
-      local base_hl = vim.api.nvim_get_hl(0, { name = base_hl_name, link = false })
-      local fg = base_hl.fg
-
-      -- Set the combined highlight (will be cached by nvim)
-      vim.api.nvim_set_hl(0, combined_name, { fg = fg, bg = selected_bg })
-      return combined_name
+      return M.get_selected_highlight(base_hl or "Normal", "CodeDiffExplorerSelected")
     end
 
     -- Check if we're in tree mode (directory is already shown in hierarchy)
@@ -336,72 +477,20 @@ function M.prepare_node(node, max_width, selected_path, selected_group)
       line:append(indent, get_hl("Normal"))
     end
 
-    local icon_part = ""
-    if data.icon then
-      icon_part = data.icon .. " "
-      line:append(icon_part, get_hl(data.icon_color))
+    local file_line = M.prepare_flat_file_line({
+      path = data.path or node.text,
+      old_path = data.old_path,
+      status = data.status,
+    }, max_width - vim.fn.strdisplaywidth(indent), {
+      selected = is_selected,
+      selection_hl = "CodeDiffExplorerSelected",
+      filename_hl = "Normal",
+      path_hl = view_mode == "tree" and "Normal" or "ExplorerDirectorySmall",
+      normal_hl = "Normal",
+    })
+    for _, seg in ipairs(file_line._segments) do
+      line:append(seg.text, seg.hl)
     end
-
-    -- Status symbol at the end (e.g., "M", "D", "??")
-    local status_symbol = data.status_symbol or ""
-
-    -- Split path into filename and directory
-    local full_path = data.path or node.text
-    local filename = full_path:match("([^/]+)$") or full_path
-    -- In tree mode, don't show directory (it's in the hierarchy)
-    local directory = (view_mode == "tree") and "" or full_path:sub(1, -(#filename + 1))
-
-    -- Calculate how much width we've used and reserve for status
-    local used_width = vim.fn.strdisplaywidth(indent) + vim.fn.strdisplaywidth(icon_part)
-    local status_reserve = vim.fn.strdisplaywidth(status_symbol) + 3 -- 2 spaces before + 1 space after status
-    local available_for_content = max_width - used_width - status_reserve
-
-    -- Show: filename + full directory path, truncate directory from left if needed
-    local filename_len = vim.fn.strdisplaywidth(filename)
-    local directory_len = vim.fn.strdisplaywidth(directory)
-    local space_len = (directory_len > 0) and 1 or 0
-
-    if filename_len + space_len + directory_len > available_for_content then
-      -- Truncate directory from the right (keep the start)
-      local available_for_dir = available_for_content - filename_len - space_len
-      if available_for_dir > 3 then
-        local ellipsis = "..."
-        local chars_to_keep = available_for_dir - vim.fn.strdisplaywidth(ellipsis)
-
-        -- Truncate directory by display width, not byte index
-        local byte_pos = 0
-        local accumulated_width = 0
-        for char in vim.gsplit(directory, "") do
-          local char_width = vim.fn.strdisplaywidth(char)
-          if accumulated_width + char_width > chars_to_keep then
-            break
-          end
-          accumulated_width = accumulated_width + char_width
-          byte_pos = byte_pos + #char
-        end
-        directory = directory:sub(1, byte_pos) .. ellipsis
-      else
-        -- Not enough space for directory, just show filename
-        directory = ""
-        space_len = 0
-      end
-    end
-
-    -- Append filename (normal weight) and directory (dimmed)
-    line:append(filename, get_hl("Normal"))
-    if #directory > 0 then
-      line:append(" ", get_hl("Normal"))
-      line:append(directory, get_hl("ExplorerDirectorySmall"))
-    end
-
-    -- Add padding to push status symbol to the right edge
-    local content_len = vim.fn.strdisplaywidth(filename) + space_len + vim.fn.strdisplaywidth(directory)
-    local padding_needed = available_for_content - content_len + 2
-    if padding_needed > 0 then
-      line:append(string.rep(" ", padding_needed), get_hl("Normal"))
-    end
-    line:append(status_symbol, get_hl(data.status_color))
-    line:append(" ", get_hl("Normal")) -- Right padding (matches status_reserve calculation)
   end
 
   return line

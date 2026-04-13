@@ -2,8 +2,9 @@
 
 ## Using the Plugin
 
-- **[git-integration.md](git-integration.md)** — Compare files with any git revision (`:CodeDiff HEAD`, `:CodeDiff main`, etc.)
+- **[git-integration.md](git-integration.md)** — Compare files with any git revision (`:CorkDiff HEAD`, `:CorkDiff main`, etc.)
 - **[performance.md](performance.md)** — Timeout control for large files and how the two-phase diff balances speed vs. detail
+- `:CorkDiff t3code` connects directly to the running `t3code` websocket backend and requires the `http` Lua rock (`lua-http`)
 
 ## Building & Contributing
 
@@ -19,6 +20,6 @@
 
 ## Development History
 
-For the full story of building codediff.nvim — algorithm development, parity evaluations, architecture decisions:
+For the full story of building corkdiff.nvim — algorithm development, parity evaluations, architecture decisions:
 
 - **[development/](development/)** — 14 months of development logs organized into narrative reading paths

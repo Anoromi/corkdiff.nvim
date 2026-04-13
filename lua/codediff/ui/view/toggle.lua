@@ -75,6 +75,11 @@ local function rerender_current_file(tabpage)
     return history and require("codediff.ui.history").rerender_current(history) or false
   end
 
+  if session.mode == "t3code" then
+    local t3code = lifecycle.get_explorer(tabpage)
+    return t3code and require("codediff.t3code.session").rerender_current(t3code) or false
+  end
+
   -- Standalone mode: rebuild from session fields
   local session_config = {
     mode = session.mode,

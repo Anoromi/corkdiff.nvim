@@ -36,7 +36,7 @@ local function section(title, entries)
 end
 
 -- Build sections based on the current session mode
-local function build_sections(keymaps, is_explorer, is_history, is_conflict)
+local function build_sections(keymaps, is_explorer, is_history, is_t3code, is_conflict)
   local sections = {}
   local km = keymaps.view
 
@@ -49,17 +49,22 @@ local function build_sections(keymaps, is_explorer, is_history, is_conflict)
     { km.diff_put, "Put change to other buffer" },
     { km.open_in_prev_tab, "Open buffer in previous tab" },
   }
-  if is_explorer or is_history then
+  if is_explorer or is_history or is_t3code then
     table.insert(view_items, { km.next_file, "Next file" })
     table.insert(view_items, { km.prev_file, "Previous file" })
   end
-  if is_explorer then
+  if is_explorer or is_t3code then
     table.insert(view_items, { km.toggle_explorer, "Toggle explorer" })
     table.insert(view_items, { km.focus_explorer, "Focus explorer" })
+  end
+  if is_explorer then
     table.insert(view_items, { km.toggle_stage, "Stage/unstage current file" })
     table.insert(view_items, { km.stage_hunk, "Stage hunk under cursor" })
     table.insert(view_items, { km.unstage_hunk, "Unstage hunk under cursor" })
     table.insert(view_items, { km.discard_hunk, "Discard hunk under cursor" })
+  end
+  if km.hover then
+    table.insert(view_items, { km.hover, "Show deleted/original hunk text" })
   end
   table.insert(view_items, { km.toggle_layout, "Toggle inline/side-by-side layout" })
   if km.align_move then
@@ -113,6 +118,21 @@ local function build_sections(keymaps, is_explorer, is_history, is_conflict)
         { hkm.fold_toggle_recursive, "Toggle fold recursively" },
         { hkm.fold_open_all, "Open all folds" },
         { hkm.fold_close_all, "Close all folds" },
+      })
+    )
+  end
+
+  if is_t3code then
+    local tkm = keymaps.t3code or {}
+    table.insert(
+      sections,
+      section("T3CODE", {
+        { tkm.next_turn, "Next turn" },
+        { tkm.prev_turn, "Previous turn" },
+        { tkm.select_all_turns, "Select all turns" },
+        { tkm.refresh, "Refresh snapshot" },
+        { tkm.toggle_turn_view_mode, "Toggle live/history mode" },
+        { tkm.focus_app, "Focus T3 Code app" },
       })
     )
   end
@@ -209,9 +229,10 @@ function M.toggle(tabpage)
   local keymaps = config.options.keymaps
   local is_explorer = session and session.mode == "explorer"
   local is_history = session and session.mode == "history"
+  local is_t3code = session and session.mode == "t3code"
   local is_conflict = session and session.result_bufnr ~= nil
 
-  local sections = build_sections(keymaps, is_explorer, is_history, is_conflict)
+  local sections = build_sections(keymaps, is_explorer, is_history, is_t3code, is_conflict)
   local win_width = compute_width(sections)
   local lines, hls = render(sections, win_width)
 

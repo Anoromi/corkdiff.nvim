@@ -79,6 +79,21 @@ M.defaults = {
     view_mode = "list", -- "list" or "tree" for files under commits
   },
 
+  -- T3code panel configuration (for :CodeDiff t3code)
+  t3code = {
+    server_url = "ws://127.0.0.1:3773/ws",
+    token = vim.env.T3CODE_TOKEN or nil,
+    include_archived_threads = false,
+    default_view_mode = "live", -- "live" or "history"
+    default_layout = "inline", -- Inline is the primary t3code UX
+    use_live_buffer = true,
+    request_timeout = 10,
+    position = "left", -- "left" or "bottom"
+    width = 40, -- Width when position is "left" (columns)
+    height = 15, -- Height when position is "bottom" (lines)
+    initial_focus = "panel", -- "panel", "original", or "modified"
+  },
+
   -- Keymaps
   keymaps = {
     view = {
@@ -99,6 +114,7 @@ M.defaults = {
       discard_hunk = "<leader>hr", -- Discard the hunk under cursor (working tree only)
       hunk_textobject = "ih", -- Textobject for hunk (vih to select, yih to yank, etc.)
       align_move = "gm", -- Temporarily align other pane to show paired moved code
+      hover = "gk", -- Show deleted/original hunk text in inline mode
       toggle_layout = "t", -- Toggle diff layout for the current codediff session
       show_help = "g?", -- Show floating window with available keymaps
     },
@@ -135,6 +151,15 @@ M.defaults = {
       fold_toggle_recursive = "zA",
       fold_open_all = "zR",
       fold_close_all = "zM",
+    },
+    t3code = {
+      next_turn = "]t",
+      prev_turn = "[t",
+      select_all_turns = "gt",
+      refresh = "R",
+      toggle_turn_view_mode = "m",
+      focus_app = "<C-d>",
+      open_and_focus = "<S-CR>",
     },
     -- Conflict mode keymaps (only active in merge conflict views)
     conflict = {

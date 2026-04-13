@@ -6,6 +6,7 @@ local lifecycle = require("codediff.ui.lifecycle")
 local auto_refresh = require("codediff.ui.auto_refresh")
 local config = require("codediff.config")
 local diff_module = require("codediff.core.diff")
+local events = require("codediff.ui.events")
 local inline = require("codediff.ui.inline")
 local semantic = require("codediff.ui.semantic_tokens")
 local layout = require("codediff.ui.layout")
@@ -15,6 +16,60 @@ local helpers = require("codediff.ui.view.helpers")
 local panel = require("codediff.ui.view.panel")
 local is_virtual_revision = helpers.is_virtual_revision
 local prepare_buffer = helpers.prepare_buffer
+
+local function sanitize_lines(lines)
+  local sanitized = {}
+  for _, line in ipairs(lines or {}) do
+    sanitized[#sanitized + 1] = line == nil and "" or tostring(line)
+  end
+  return sanitized
+end
+
+local function set_buffer_lines(bufnr, lines, readonly)
+  vim.bo[bufnr].modifiable = true
+  vim.bo[bufnr].readonly = false
+  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, sanitize_lines(lines))
+  vim.bo[bufnr].modifiable = not readonly
+  vim.bo[bufnr].readonly = readonly or false
+end
+
+local function create_content_buffer(lines, path, readonly)
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.bo[bufnr].buftype = "nofile"
+  vim.bo[bufnr].bufhidden = "hide"
+  local ft = path and vim.filetype.match({ filename = path }) or nil
+  if ft and ft ~= "" then
+    vim.bo[bufnr].filetype = ft
+  end
+  set_buffer_lines(bufnr, lines, readonly)
+  return bufnr
+end
+
+local function should_reuse_current_tab(session_config)
+  if session_config.reuse_current_tab then
+    return true
+  end
+  if session_config.mode ~= "t3code" then
+    return false
+  end
+  if #vim.api.nvim_list_tabpages() ~= 1 then
+    return false
+  end
+  if #vim.api.nvim_tabpage_list_wins(0) ~= 1 then
+    return false
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+
+  return vim.api.nvim_buf_get_name(bufnr) == ""
+    and vim.bo[bufnr].buftype == ""
+    and not vim.bo[bufnr].modified
+    and vim.fn.line("$") == 1
+    and vim.fn.getline(1) == ""
+end
 
 -- ============================================================================
 -- Compute diff and render inline highlights
@@ -86,8 +141,9 @@ end
 ---@param on_ready? function
 ---@return table|nil
 function M.create(session_config, filetype, on_ready)
-  -- Create new tab
-  vim.cmd("tabnew")
+  if not should_reuse_current_tab(session_config) then
+    vim.cmd("tabnew")
+  end
   local tabpage = vim.api.nvim_get_current_tabpage()
   local modified_win = vim.api.nvim_get_current_win()
   local initial_buf = vim.api.nvim_get_current_buf()
@@ -96,8 +152,9 @@ function M.create(session_config, filetype, on_ready)
   local is_explorer_placeholder = session_config.mode == "explorer"
     and ((session_config.original_path == "" or session_config.original_path == nil) or (not session_config.git_root and session_config.explorer_data))
   local is_history_placeholder = session_config.mode == "history" and session_config.history_data
+  local is_t3code_placeholder = session_config.mode == "t3code" and session_config.t3code_data and session_config.original_path == "" and session_config.modified_path == ""
 
-  if is_explorer_placeholder or is_history_placeholder then
+  if is_explorer_placeholder or is_history_placeholder or is_t3code_placeholder then
     -- Placeholder: single window with scratch buffer, no diff yet
     local mod_scratch = vim.api.nvim_create_buf(false, true)
     vim.bo[mod_scratch].buftype = "nofile"
@@ -142,27 +199,55 @@ function M.create(session_config, filetype, on_ready)
     panel.setup_history(tabpage, session_config, modified_win, modified_win, orig_scratch, mod_scratch, function(tp, ob, mb)
       setup_keymaps(tp, ob, mb)
     end)
+    panel.setup_t3code(tabpage, session_config)
 
     layout.arrange(tabpage)
 
-    vim.api.nvim_exec_autocmds("User", {
-      pattern = "CodeDiffOpen",
-      modeline = false,
-      data = { tabpage = tabpage, mode = session_config.mode, layout = "inline" },
-    })
+    events.emit("CodeDiffOpen", { tabpage = tabpage, mode = session_config.mode, layout = "inline" })
 
     return { modified_buf = mod_scratch, original_buf = orig_scratch, modified_win = modified_win }
   end
 
   -- Normal (non-placeholder) inline view creation
-  local original_is_virtual = is_virtual_revision(session_config.original_revision)
-  local modified_is_virtual = is_virtual_revision(session_config.modified_revision)
+  local has_original_content = session_config.original_content_lines ~= nil
+  local has_modified_content = session_config.modified_content_lines ~= nil
+  local has_modified_bufnr = session_config.modified_bufnr and vim.api.nvim_buf_is_valid(session_config.modified_bufnr)
+  local original_is_virtual = has_original_content or is_virtual_revision(session_config.original_revision)
+  local modified_is_virtual = has_modified_content or is_virtual_revision(session_config.modified_revision)
 
-  local original_info = prepare_buffer(original_is_virtual, session_config.git_root, session_config.original_revision, session_config.original_path)
-  local modified_info = prepare_buffer(modified_is_virtual, session_config.git_root, session_config.modified_revision, session_config.modified_path)
+  local original_info
+  if has_original_content then
+    original_info = {
+      bufnr = create_content_buffer(session_config.original_content_lines, session_config.original_path, true),
+      needs_edit = false,
+    }
+  else
+    original_info = prepare_buffer(original_is_virtual, session_config.git_root, session_config.original_revision, session_config.original_path)
+  end
+
+  local modified_info
+  if has_modified_bufnr then
+    modified_info = {
+      bufnr = session_config.modified_bufnr,
+      needs_edit = false,
+    }
+  elseif has_modified_content then
+    modified_info = {
+      bufnr = create_content_buffer(
+        session_config.modified_content_lines,
+        session_config.modified_path,
+        session_config.t3code_data and session_config.t3code_data.readonly_modified
+      ),
+      needs_edit = false,
+    }
+  else
+    modified_info = prepare_buffer(modified_is_virtual, session_config.git_root, session_config.modified_revision, session_config.modified_path)
+  end
 
   -- Load modified buffer into the visible window
-  if modified_info.needs_edit then
+  if has_modified_bufnr then
+    vim.api.nvim_win_set_buf(modified_win, modified_info.bufnr)
+  elseif modified_info.needs_edit then
     local cmd = modified_is_virtual and "edit! " or "edit "
     vim.cmd(cmd .. vim.fn.fnameescape(modified_info.target))
     modified_info.bufnr = vim.api.nvim_get_current_buf()
@@ -172,7 +257,9 @@ function M.create(session_config, filetype, on_ready)
   welcome_window.sync(modified_win)
 
   -- Load original buffer (hidden — never displayed in a window)
-  if original_is_virtual and original_info.needs_edit then
+  if has_original_content then
+    -- Scratch buffer already populated above.
+  elseif original_is_virtual and original_info.needs_edit then
     -- Can't use :edit with codediff:// URIs because bufhidden=wipe destroys
     -- the buffer when no window displays it. Use scratch buffer instead.
     local orig_buf = vim.api.nvim_create_buf(false, true)
@@ -214,9 +301,9 @@ function M.create(session_config, filetype, on_ready)
     )
 
     if lines_diff then
-      lifecycle.create_session(
-        tabpage,
-        session_config.mode,
+          lifecycle.create_session(
+            tabpage,
+            session_config.mode,
         session_config.git_root,
         session_config.original_path,
         session_config.modified_path,
@@ -237,8 +324,12 @@ function M.create(session_config, filetype, on_ready)
 
       mark_inline(tabpage)
 
-      auto_refresh.enable(original_info.bufnr)
-      auto_refresh.enable(modified_info.bufnr)
+          if vim.bo[original_info.bufnr].buftype == "" then
+            auto_refresh.enable(original_info.bufnr)
+          end
+          if vim.bo[modified_info.bufnr].buftype == "" then
+            auto_refresh.enable(modified_info.bufnr)
+          end
 
       setup_keymaps(tabpage, original_info.bufnr, modified_info.bufnr)
 
@@ -249,7 +340,11 @@ function M.create(session_config, filetype, on_ready)
   end
 
   -- Async buffer loading
-  if original_is_virtual then
+  if has_original_content then
+    if has_modified_content or has_modified_bufnr or not modified_is_virtual then
+      vim.schedule(render_everything)
+    end
+  elseif original_is_virtual then
     local git = require("codediff.core.git")
     git.get_file_content(session_config.original_revision, session_config.git_root, session_config.original_path, function(err, lines)
       vim.schedule(function()
@@ -280,6 +375,8 @@ function M.create(session_config, filetype, on_ready)
         end
       end)
     end)
+  elseif has_modified_content or has_modified_bufnr then
+    vim.schedule(render_everything)
   elseif modified_is_virtual then
     local group = vim.api.nvim_create_augroup("CodeDiffInlineVirtualLoad_" .. tabpage, { clear = true })
     vim.api.nvim_create_autocmd("User", {
@@ -301,14 +398,11 @@ function M.create(session_config, filetype, on_ready)
   panel.setup_history(tabpage, session_config, modified_win, modified_win, original_info.bufnr, modified_info.bufnr, function(tp, ob, mb)
     setup_keymaps(tp, ob, mb)
   end)
+  panel.setup_t3code(tabpage, session_config)
 
   layout.arrange(tabpage)
 
-  vim.api.nvim_exec_autocmds("User", {
-    pattern = "CodeDiffOpen",
-    modeline = false,
-    data = { tabpage = tabpage, mode = session_config.mode, layout = "inline" },
-  })
+  events.emit("CodeDiffOpen", { tabpage = tabpage, mode = session_config.mode, layout = "inline" })
 
   return { modified_buf = modified_info.bufnr, original_buf = original_info.bufnr, modified_win = modified_win }
 end
@@ -344,19 +438,34 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
 
   lifecycle.update_diff_result(tabpage, nil)
 
-  local original_is_virtual = is_virtual_revision(session_config.original_revision)
-  local modified_is_virtual = is_virtual_revision(session_config.modified_revision)
+  local has_original_content = session_config.original_content_lines ~= nil
+  local has_modified_content = session_config.modified_content_lines ~= nil
+  local has_modified_bufnr = session_config.modified_bufnr and vim.api.nvim_buf_is_valid(session_config.modified_bufnr)
+  local original_is_virtual = has_original_content or is_virtual_revision(session_config.original_revision)
+  local modified_is_virtual = has_modified_content or is_virtual_revision(session_config.modified_revision)
 
   -- For inline mode, load ALL virtual buffers via git.get_file_content into scratch
   -- buffers instead of codediff:// URIs (avoids race conditions and bufhidden=wipe)
 
   local orig_buf = vim.api.nvim_create_buf(false, true)
   vim.bo[orig_buf].buftype = "nofile"
+  vim.bo[orig_buf].bufhidden = "hide"
 
   local mod_buf
-  if modified_is_virtual then
+  if has_modified_bufnr then
+    mod_buf = session_config.modified_bufnr
+    vim.api.nvim_win_set_buf(modified_win, mod_buf)
+  elseif has_modified_content then
+    mod_buf = create_content_buffer(
+      session_config.modified_content_lines,
+      session_config.modified_path,
+      session_config.t3code_data and session_config.t3code_data.readonly_modified
+    )
+    vim.api.nvim_win_set_buf(modified_win, mod_buf)
+  elseif modified_is_virtual then
     mod_buf = vim.api.nvim_create_buf(false, true)
     vim.bo[mod_buf].buftype = "nofile"
+    vim.bo[mod_buf].bufhidden = "hide"
     vim.bo[mod_buf].modifiable = true
     vim.api.nvim_win_set_buf(modified_win, mod_buf)
     local ft = vim.filetype.match({ filename = session_config.modified_path })
@@ -402,8 +511,12 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
       lifecycle.update_changedtick(tabpage, vim.api.nvim_buf_get_changedtick(orig_buf), vim.api.nvim_buf_get_changedtick(mod_buf))
       lifecycle.update_paths(tabpage, session_config.original_path or "", session_config.modified_path or "")
 
-      auto_refresh.enable(orig_buf)
-      auto_refresh.enable(mod_buf)
+      if vim.bo[orig_buf].buftype == "" then
+        auto_refresh.enable(orig_buf)
+      end
+      if vim.bo[mod_buf].buftype == "" then
+        auto_refresh.enable(mod_buf)
+      end
 
       setup_keymaps(tabpage, orig_buf, mod_buf)
       layout.arrange(tabpage)
@@ -415,7 +528,7 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   end
 
   -- Async loading with pending counter
-  local pending = { original = original_is_virtual, modified = modified_is_virtual }
+  local pending = { original = original_is_virtual and not has_original_content, modified = modified_is_virtual and not has_modified_content and not has_modified_bufnr }
   local git = require("codediff.core.git")
 
   local function check_ready()
@@ -424,7 +537,10 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
     end
   end
 
-  if original_is_virtual then
+  if has_original_content then
+    set_buffer_lines(orig_buf, session_config.original_content_lines, true)
+    pending.original = false
+  elseif original_is_virtual then
     git.get_file_content(session_config.original_revision, session_config.git_root, session_config.original_path or session_config.modified_path, function(err, lines)
       vim.schedule(function()
         if not vim.api.nvim_buf_is_valid(orig_buf) then
@@ -453,7 +569,9 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
     pending.original = false
   end
 
-  if modified_is_virtual then
+  if has_modified_content or has_modified_bufnr then
+    pending.modified = false
+  elseif modified_is_virtual then
     git.get_file_content(session_config.modified_revision, session_config.git_root, session_config.modified_path, function(err, lines)
       vim.schedule(function()
         if not vim.api.nvim_buf_is_valid(mod_buf) then

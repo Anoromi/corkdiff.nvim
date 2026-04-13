@@ -2,6 +2,10 @@
 local M = {}
 local config = require("codediff.config")
 
+local function set_alias_highlight(alias_name, source_name)
+  vim.api.nvim_set_hl(0, alias_name, { link = source_name, default = true })
+end
+
 -- Namespaces for highlights and fillers
 M.ns_highlight = vim.api.nvim_create_namespace("codediff-highlight")
 M.ns_filler = vim.api.nvim_create_namespace("codediff-filler")
@@ -237,6 +241,70 @@ function M.setup()
     link = "FloatTitle",
     default = true,
   })
+
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeHeading", {
+    link = "CodeDiffHistoryTitle",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeFilename", {
+    link = "Normal",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codePath", {
+    link = "ExplorerDirectorySmall",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeSelection", {
+    link = "CodeDiffExplorerSelected",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeTabActive", {
+    link = "TabLineSel",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeTabInactive", {
+    link = "TabLine",
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, "CodeDiffT3codeTabSeparator", {
+    link = "WinSeparator",
+    default = true,
+  })
+
+  local alias_pairs = {
+    { "CorkDiffLineInsert", "CodeDiffLineInsert" },
+    { "CorkDiffLineDelete", "CodeDiffLineDelete" },
+    { "CorkDiffCharInsert", "CodeDiffCharInsert" },
+    { "CorkDiffCharDelete", "CodeDiffCharDelete" },
+    { "CorkDiffLineMove", "CodeDiffLineMove" },
+    { "CorkDiffCharMove", "CodeDiffCharMove" },
+    { "CorkDiffMoveFrom", "CodeDiffMoveFrom" },
+    { "CorkDiffMoveTo", "CodeDiffMoveTo" },
+    { "CorkDiffFiller", "CodeDiffFiller" },
+    { "CorkDiffExplorerSelected", "CodeDiffExplorerSelected" },
+    { "CorkDiffStatusAdded", "CodeDiffStatusAdded" },
+    { "CorkDiffStatusModified", "CodeDiffStatusModified" },
+    { "CorkDiffStatusDeleted", "CodeDiffStatusDeleted" },
+    { "CorkDiffStatusRenamed", "CodeDiffStatusRenamed" },
+    { "CorkDiffStatusUntracked", "CodeDiffStatusUntracked" },
+    { "CorkDiffStatusConflict", "CodeDiffStatusConflict" },
+    { "CorkDiffConflictSign", "CodeDiffConflictSign" },
+    { "CorkDiffConflictSignResolved", "CodeDiffConflictSignResolved" },
+    { "CorkDiffConflictSignAccepted", "CodeDiffConflictSignAccepted" },
+    { "CorkDiffConflictSignRejected", "CodeDiffConflictSignRejected" },
+    { "CorkDiffHistoryTitle", "CodeDiffHistoryTitle" },
+    { "CorkDiffT3codeHeading", "CodeDiffT3codeHeading" },
+    { "CorkDiffT3codeFilename", "CodeDiffT3codeFilename" },
+    { "CorkDiffT3codePath", "CodeDiffT3codePath" },
+    { "CorkDiffT3codeSelection", "CodeDiffT3codeSelection" },
+    { "CorkDiffT3codeTabActive", "CodeDiffT3codeTabActive" },
+    { "CorkDiffT3codeTabInactive", "CodeDiffT3codeTabInactive" },
+    { "CorkDiffT3codeTabSeparator", "CodeDiffT3codeTabSeparator" },
+  }
+
+  for _, pair in ipairs(alias_pairs) do
+    set_alias_highlight(pair[1], pair[2])
+  end
 end
 
 return M

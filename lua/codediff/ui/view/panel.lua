@@ -1,4 +1,4 @@
--- Panel setup for explorer and history sidebars
+-- Panel setup for explorer, history, and t3code sidebars
 -- Shared utility used by both side-by-side and inline view engines
 local M = {}
 
@@ -9,6 +9,7 @@ local config = require("codediff.config")
 -- when CWD changes in vim.schedule callbacks
 local explorer_module = require("codediff.ui.explorer")
 local history_module = require("codediff.ui.history")
+local t3code_module = require("codediff.t3code.session")
 local layout = require("codediff.ui.layout")
 
 --- Create explorer sidebar for a diff tabpage
@@ -88,6 +89,18 @@ function M.setup_history(tabpage, session_config, original_win, modified_win, or
 
   -- History mode needs keymaps set after session is created
   setup_keymaps_fn(tabpage, original_bufnr, modified_bufnr)
+end
+
+--- Create t3code panel for a diff tabpage
+---@param tabpage number
+---@param session_config SessionConfig
+function M.setup_t3code(tabpage, session_config)
+  if not (session_config.mode == "t3code" and session_config.t3code_data) then
+    return
+  end
+
+  t3code_module.create(session_config, tabpage)
+  layout.arrange(tabpage)
 end
 
 return M

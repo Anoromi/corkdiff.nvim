@@ -6,15 +6,19 @@ local auto_refresh = require("codediff.ui.auto_refresh")
 local config = require("codediff.config")
 local navigation = require("codediff.ui.view.navigation")
 local render = require("codediff.ui.view.render")
+local buffer_highlighting = require("codediff.core.buffer_highlighting")
 
 -- Centralized keymap setup for all diff view keymaps
 -- This function sets up ALL keymaps in one place for better maintainability
 function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explorer_mode)
   local keymaps = config.options.keymaps.view
+  local hover_win = nil
+  local hover_buf = nil
 
   -- Check mode context
   local session = lifecycle.get_session(tabpage)
   local is_history_mode = session and session.mode == "history"
+  local is_t3code_mode = session and session.mode == "t3code"
   local is_inline = session and session.layout == "inline"
 
   -- Helper: Quit diff view
@@ -37,25 +41,33 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
   local function toggle_explorer()
     local explorer_obj = lifecycle.get_explorer(tabpage)
     if not explorer_obj then
-      vim.notify("No explorer found for this tab", vim.log.levels.WARN)
+      vim.notify("No panel found for this tab", vim.log.levels.WARN)
       return
     end
-    local explorer = require("codediff.ui.explorer")
-    explorer.toggle_visibility(explorer_obj)
+    if is_t3code_mode then
+      require("codediff.t3code.session").toggle_visibility(explorer_obj)
+    else
+      local explorer = require("codediff.ui.explorer")
+      explorer.toggle_visibility(explorer_obj)
+    end
   end
 
   -- Helper: Focus explorer panel (explorer mode only)
   local function focus_explorer()
     local explorer_obj = lifecycle.get_explorer(tabpage)
     if not explorer_obj then
-      vim.notify("No explorer found for this tab", vim.log.levels.WARN)
+      vim.notify("No panel found for this tab", vim.log.levels.WARN)
       return
     end
     local split = explorer_obj.split
     if not split or not split.winid or not vim.api.nvim_win_is_valid(split.winid) then
-      -- Explorer is hidden, show it first then focus
-      local explorer = require("codediff.ui.explorer")
-      explorer.toggle_visibility(explorer_obj)
+      if is_t3code_mode then
+        require("codediff.t3code.session").toggle_visibility(explorer_obj)
+      else
+        local explorer = require("codediff.ui.explorer")
+        explorer.toggle_visibility(explorer_obj)
+      end
+      split = explorer_obj.split
     end
     if split and split.winid and vim.api.nvim_win_is_valid(split.winid) then
       vim.api.nvim_set_current_win(split.winid)
@@ -93,6 +105,115 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       end
     end
     return nil, nil
+  end
+
+  local function close_hover()
+    if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+      vim.api.nvim_win_close(hover_win, true)
+    end
+    hover_win = nil
+    hover_buf = nil
+  end
+
+  local function show_inline_deleted_hover()
+    if not is_inline then
+      return
+    end
+
+    if hover_win and vim.api.nvim_win_is_valid(hover_win) then
+      close_hover()
+      return
+    end
+
+    local hunk = find_hunk_at_cursor()
+    if not hunk then
+      vim.notify("No hunk at cursor position", vim.log.levels.INFO)
+      return
+    end
+
+    local start_line = hunk.original.start_line
+    local end_line = hunk.original.end_line
+    if start_line >= end_line then
+      vim.notify("No deleted/original lines in this hunk", vim.log.levels.INFO)
+      return
+    end
+
+    local lines = vim.api.nvim_buf_get_lines(original_bufnr, start_line - 1, end_line - 1, false)
+    if #lines == 0 then
+      vim.notify("No deleted/original lines in this hunk", vim.log.levels.INFO)
+      return
+    end
+
+    local source_ft = vim.bo[original_bufnr].filetype
+    if not source_ft or source_ft == "" then
+      source_ft = vim.bo[modified_bufnr].filetype
+    end
+    if (not source_ft or source_ft == "") and vim.api.nvim_buf_is_valid(vim.api.nvim_get_current_buf()) then
+      source_ft = vim.bo[vim.api.nvim_get_current_buf()].filetype
+    end
+
+    local width = 0
+    for _, line in ipairs(lines) do
+      width = math.max(width, vim.fn.strdisplaywidth(line))
+    end
+    width = math.max(20, math.min(width + 2, math.max(20, vim.api.nvim_win_get_width(0) - 8)))
+    local height = math.min(#lines, math.max(1, vim.api.nvim_win_get_height(0) - 4))
+
+    hover_buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[hover_buf].buftype = "nofile"
+    vim.bo[hover_buf].bufhidden = "wipe"
+    vim.bo[hover_buf].swapfile = false
+    vim.bo[hover_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(hover_buf, 0, -1, false, lines)
+    vim.bo[hover_buf].modifiable = false
+    vim.bo[hover_buf].readonly = true
+    buffer_highlighting.apply_scratch_highlighting(hover_buf, source_ft)
+
+    hover_win = vim.api.nvim_open_win(hover_buf, true, {
+      relative = "cursor",
+      row = 1,
+      col = 1,
+      width = width,
+      height = height,
+      style = "minimal",
+      border = "rounded",
+    })
+
+    vim.wo[hover_win].wrap = false
+    vim.wo[hover_win].cursorline = false
+    vim.wo[hover_win].number = false
+    vim.wo[hover_win].relativenumber = false
+    vim.wo[hover_win].signcolumn = "no"
+    vim.wo[hover_win].foldcolumn = "0"
+    for line_nr, line in ipairs(lines) do
+      local first_non_ws = line:find("%S")
+      if first_non_ws then
+        pcall(vim.api.nvim_win_set_cursor, hover_win, { line_nr, first_non_ws - 1 })
+        break
+      end
+    end
+    vim.keymap.set("n", "q", close_hover, {
+      buffer = hover_buf,
+      noremap = true,
+      silent = true,
+      nowait = true,
+      desc = "Close deleted/original hunk preview",
+    })
+    vim.keymap.set("n", "<Esc>", close_hover, {
+      buffer = hover_buf,
+      noremap = true,
+      silent = true,
+      nowait = true,
+      desc = "Close deleted/original hunk preview",
+    })
+
+    vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
+      buffer = hover_buf,
+      once = true,
+      callback = function()
+        close_hover()
+      end,
+    })
   end
 
   -- Helper: Diff get - obtain change from other buffer to current buffer
@@ -566,11 +687,15 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
   end
 
   -- Explorer toggle (e) - only in explorer mode
-  if is_explorer_mode and keymaps.toggle_explorer then
-    lifecycle.set_tab_keymap(tabpage, "n", keymaps.toggle_explorer, toggle_explorer, { desc = "Toggle explorer visibility" })
+  if (is_explorer_mode or is_t3code_mode) and keymaps.toggle_explorer then
+    lifecycle.set_tab_keymap(tabpage, "n", keymaps.toggle_explorer, toggle_explorer, {
+      desc = is_t3code_mode and "Toggle t3code panel visibility" or "Toggle explorer visibility",
+    })
   end
-  if is_explorer_mode and keymaps.focus_explorer then
-    lifecycle.set_tab_keymap(tabpage, "n", keymaps.focus_explorer, focus_explorer, { desc = "Focus explorer panel" })
+  if (is_explorer_mode or is_t3code_mode) and keymaps.focus_explorer then
+    lifecycle.set_tab_keymap(tabpage, "n", keymaps.focus_explorer, focus_explorer, {
+      desc = is_t3code_mode and "Focus t3code panel" or "Focus explorer panel",
+    })
   end
 
   -- Diff get/put (do, dp) - layout-aware semantics
@@ -622,13 +747,57 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     end, { desc = "Show keymap help" })
   end
 
+  if keymaps.hover and is_inline and modified_bufnr and vim.api.nvim_buf_is_valid(modified_bufnr) then
+    vim.keymap.set("n", keymaps.hover, show_inline_deleted_hover, {
+      buffer = modified_bufnr,
+      noremap = true,
+      silent = true,
+      nowait = true,
+      desc = "Show deleted/original hunk text",
+    })
+  end
+
   -- File navigation (]f, [f) - works in both explorer and history mode
-  if is_explorer_mode or is_history_mode then
+  if is_explorer_mode or is_history_mode or is_t3code_mode then
     if keymaps.next_file then
       lifecycle.set_tab_keymap(tabpage, "n", keymaps.next_file, navigation.next_file, { desc = "Next file" })
     end
     if keymaps.prev_file then
       lifecycle.set_tab_keymap(tabpage, "n", keymaps.prev_file, navigation.prev_file, { desc = "Previous file" })
+    end
+  end
+
+  if is_t3code_mode then
+    local tkm = config.options.keymaps.t3code or {}
+    if tkm.focus_app then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.focus_app, function()
+        require("codediff.t3code.session").focus_app(tabpage)
+      end, { desc = "Focus T3 Code app" })
+    end
+    if tkm.refresh then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.refresh, function()
+        require("codediff.t3code.session").refresh(tabpage)
+      end, { desc = "Refresh t3code snapshot" })
+    end
+    if tkm.toggle_turn_view_mode then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.toggle_turn_view_mode, function()
+        require("codediff.t3code.session").toggle_turn_view_mode(tabpage)
+      end, { desc = "Toggle t3code live/history" })
+    end
+    if tkm.next_turn then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.next_turn, function()
+        require("codediff.t3code.session").next_turn(tabpage)
+      end, { desc = "Next t3code turn" })
+    end
+    if tkm.prev_turn then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.prev_turn, function()
+        require("codediff.t3code.session").prev_turn(tabpage)
+      end, { desc = "Previous t3code turn" })
+    end
+    if tkm.select_all_turns then
+      lifecycle.set_tab_keymap(tabpage, "n", tkm.select_all_turns, function()
+        require("codediff.t3code.session").set_turn(tabpage, "all")
+      end, { desc = "Select all turns" })
     end
   end
 

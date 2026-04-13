@@ -154,8 +154,11 @@ function M.next_file()
   end
 
   local is_history_mode = session and session.mode == "history"
+  local is_t3code_mode = session and session.mode == "t3code"
 
-  if is_history_mode then
+  if is_t3code_mode then
+    require("codediff.t3code.session").navigate_next(panel_obj)
+  elseif is_history_mode then
     local history = require("codediff.ui.history")
     if panel_obj.is_single_file_mode then
       history.navigate_next_commit(panel_obj)
@@ -183,8 +186,11 @@ function M.prev_file()
   end
 
   local is_history_mode = session and session.mode == "history"
+  local is_t3code_mode = session and session.mode == "t3code"
 
-  if is_history_mode then
+  if is_t3code_mode then
+    require("codediff.t3code.session").navigate_prev(panel_obj)
+  elseif is_history_mode then
     local history = require("codediff.ui.history")
     if panel_obj.is_single_file_mode then
       history.navigate_prev_commit(panel_obj)

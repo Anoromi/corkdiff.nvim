@@ -5,8 +5,8 @@ if vim.g.loaded_vscode_diff then
 end
 vim.g.loaded_vscode_diff = 1
 
--- Ensure codediff is loaded first (it sets up everything)
-require("codediff")
+-- Ensure corkdiff is loaded first (it sets up everything)
+require("corkdiff")
 
 -- Create legacy command alias (lazy-loads commands on first invocation)
 vim.api.nvim_create_user_command("VscodeDiff", function(opts)
@@ -24,5 +24,5 @@ end, {
     local rev_candidates = git.get_rev_candidates(git_root)
     return vim.list_extend(candidates, rev_candidates)
   end,
-  desc = "VSCode-style diff view (legacy alias for :CodeDiff)"
+  desc = "VSCode-style diff view (legacy alias for :CorkDiff)"
 })

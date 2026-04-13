@@ -1,8 +1,10 @@
-# codediff.nvim
+# corkdiff.nvim
 
 [![Downloads](https://img.shields.io/github/downloads/esmuellert/vscode-diff.nvim/total?label=⬇%20downloads&color=blue)](https://github.com/esmuellert/vscode-diff.nvim/releases)
 
 A Neovim plugin that provides VSCode-style diff rendering with two-tier highlighting, supporting both side-by-side and inline (unified) layouts.
+
+`corkdiff.nvim` is the new public name. `codediff.nvim`, `:CodeDiff`, and `require("codediff")` remain supported as legacy aliases.
 
 <div align="center">
 
@@ -46,8 +48,9 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 **Minimal installation:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
-  cmd = "CodeDiff",
+  "esmuellert/corkdiff.nvim",
+  rocks = { "http" }, -- Required for :CorkDiff t3code
+  cmd = "CorkDiff",
 }
 ```
 
@@ -56,8 +59,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 **With custom configuration:**
 ```lua
 {
-  "esmuellert/codediff.nvim",
-  cmd = "CodeDiff",
+  "esmuellert/corkdiff.nvim",
+  cmd = "CorkDiff",
   opts = {
     -- Highlight configuration
     highlights = {
@@ -126,13 +129,24 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       },
     },
 
-    -- History panel configuration (for :CodeDiff history)
+    -- History panel configuration (for :CorkDiff history)
     history = {
       position = "bottom",  -- "left" or "bottom" (default: bottom)
       width = 40,           -- Width when position is "left" (columns)
       height = 15,          -- Height when position is "bottom" (lines)
       initial_focus = "history",  -- Initial focus: "history", "original", or "modified"
       view_mode = "list",   -- "list" or "tree" for files under commits
+    },
+
+    -- T3code integration (for :CorkDiff t3code)
+    t3code = {
+      server_url = "ws://127.0.0.1:3773/ws", -- Exact websocket endpoint
+      token = vim.env.T3CODE_TOKEN or nil,   -- Sent as ?token=...
+      include_archived_threads = false,
+      default_view_mode = "live",
+      default_layout = "inline",
+      use_live_buffer = true,
+      request_timeout = 10,
     },
 
     -- Keymaps in diff view
@@ -212,6 +226,15 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 }
 ```
 
+### T3code mode
+
+`:CorkDiff t3code` connects directly to the running `t3code` websocket backend.
+
+- `lua-http` is required for this mode
+- `live` mode uses the real current file buffer, so editing and LSP stay intact
+- `history` mode opens full checkpoint file content and is read-only / non-LSP
+- `inline` is the default layout for `t3code` sessions
+
 The C library will be downloaded automatically on first use. No `build` step needed!
 
 ### Managing Library Installation
@@ -226,10 +249,10 @@ The plugin automatically manages the C library installation:
 **Manual Installation Commands:**
 ```vim
 " Install/update the library manually
-:CodeDiff install
+:CorkDiff install
 
 " Force reinstall (useful for troubleshooting)
-:CodeDiff install!
+:CorkDiff install!
 ```
 
 **Version Management:**
@@ -241,12 +264,12 @@ If you prefer to install manually without a plugin manager:
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/esmuellert/codediff.nvim ~/.local/share/nvim/codediff.nvim
+git clone https://github.com/esmuellert/corkdiff.nvim ~/.local/share/nvim/corkdiff.nvim
 ```
 
 2. **Add to your Neovim runtime path in `init.lua`:**
 ```lua
-vim.opt.rtp:append("~/.local/share/nvim/codediff.nvim")
+vim.opt.rtp:append("~/.local/share/nvim/corkdiff.nvim")
 ```
 
 3. **Install the C library:**
@@ -258,7 +281,7 @@ The plugin requires a C library binary in the plugin root directory. The plugin 
 
 **Option A: Download from GitHub releases** (recommended)
 
-Download the appropriate binary from the [GitHub releases page](https://github.com/esmuellert/codediff.nvim/releases) and place it in the plugin root directory. Rename it to match the expected format: `libvscode_diff.so`/`.dylib`/`.dll` or `libvscode_diff_<version>.so`/`.dylib`/`.dll`. **Linux users**: If your system lacks OpenMP, also download `libgomp_linux_{arch}_{version}.so.1` and rename it to `libgomp.so.1` in the same directory.
+Download the appropriate binary from the [GitHub releases page](https://github.com/esmuellert/corkdiff.nvim/releases) and place it in the plugin root directory. Rename it to match the expected format: `libvscode_diff.so`/`.dylib`/`.dll` or `libvscode_diff_<version>.so`/`.dylib`/`.dll`. **Linux users**: If your system lacks OpenMP, also download `libgomp_linux_{arch}_{version}.so.1` and rename it to `libgomp.so.1` in the same directory.
 
 **Option B: Build from source**
 
@@ -283,7 +306,7 @@ Both methods automatically place the library in the plugin root directory.
 
 ## Usage
 
-The `:CodeDiff` command supports multiple modes:
+The `:CorkDiff` command supports multiple modes. `:CodeDiff` remains available as a legacy alias.
 
 ### File Explorer Mode
 
@@ -291,23 +314,23 @@ Open an interactive file explorer showing changed files:
 
 ```vim
 " Show git status in explorer (default)
-:CodeDiff
+:CorkDiff
 
 " Show changes for specific revision in explorer
-:CodeDiff HEAD~5
+:CorkDiff HEAD~5
 
 " Compare against a branch
-:CodeDiff main
+:CorkDiff main
 
 " Compare against a specific commit
-:CodeDiff abc123
+:CorkDiff abc123
 
 " Compare two revisions (e.g. HEAD vs main)
-:CodeDiff main HEAD
+:CorkDiff main HEAD
 
 " Override layout for this invocation (works with all subcommands)
-:CodeDiff --inline
-:CodeDiff main --side-by-side
+:CorkDiff --inline
+:CorkDiff main --side-by-side
 ```
 
 #### PR-like Diff (Merge-base)
@@ -317,13 +340,13 @@ Show only changes introduced since branching from a base branch—exactly like a
 ```vim
 " Compare merge-base(main, HEAD) vs working tree
 " Shows only YOUR changes since you branched from main
-:CodeDiff main...
+:CorkDiff main...
 
 " Compare merge-base(main, HEAD) vs HEAD (committed changes only)
-:CodeDiff main...HEAD
+:CorkDiff main...HEAD
 
 " Compare merge-base between two branches
-:CodeDiff develop...feature/new-ui
+:CorkDiff develop...feature/new-ui
 ```
 
 This uses `git merge-base` semantics (equivalent to `git diff main...HEAD`), showing only the changes introduced on your branch, not changes that happened on the base branch since you branched.
@@ -334,25 +357,25 @@ Compare the current buffer with a git revision:
 
 ```vim
 " Compare with last commit
-:CodeDiff file HEAD
+:CorkDiff file HEAD
 
 " Compare with previous commit
-:CodeDiff file HEAD~1
+:CorkDiff file HEAD~1
 
 " Compare with specific commit
-:CodeDiff file abc123
+:CorkDiff file abc123
 
 " Compare with branch
-:CodeDiff file main
+:CorkDiff file main
 
 " Compare with tag
-:CodeDiff file v1.0.0
+:CorkDiff file v1.0.0
 
 " Compare two revisions for current file
-:CodeDiff file main HEAD
+:CorkDiff file main HEAD
 
 " PR-like diff: compare merge-base(main, HEAD) vs working tree
-:CodeDiff file main...
+:CorkDiff file main...
 ```
 
 **Requirements:**
@@ -371,7 +394,7 @@ Compare the current buffer with a git revision:
 Compare two arbitrary files side-by-side:
 
 ```vim
-:CodeDiff file file_a.txt file_b.txt
+:CorkDiff file file_a.txt file_b.txt
 ```
 
 ### Directory Comparison Mode
@@ -380,10 +403,10 @@ Compare two directories without git:
 
 ```vim
 " Auto-detect directories
-:CodeDiff ~/project-v1 ~/project-v2
+:CorkDiff ~/project-v1 ~/project-v2
 
 " Explicit dir subcommand
-:CodeDiff dir /path/to/dir1 /path/to/dir2
+:CorkDiff dir /path/to/dir1 /path/to/dir2
 ```
 
 Shows files as Added (A), Deleted (D), or Modified (M) using file size plus byte-level content comparison. Select a file to view its diff.
@@ -394,31 +417,31 @@ Review commits on a per-commit basis:
 
 ```vim
 " Show last 50 commits
-:CodeDiff history
+:CorkDiff history
 
 " Show last N commits
-:CodeDiff history HEAD~10
+:CorkDiff history HEAD~10
 
 " Show commits in a range (great for PR review)
-:CodeDiff history origin/main..HEAD
+:CorkDiff history origin/main..HEAD
 
 " Show commits for current file only
-:CodeDiff history HEAD~20 %
+:CorkDiff history HEAD~20 %
 
 " Show commits for a specific file
-:CodeDiff history HEAD~10 path/to/file.lua
+:CorkDiff history HEAD~10 path/to/file.lua
 
 " Show commits in chronological order (oldest first)
-:CodeDiff history --reverse
-:CodeDiff history HEAD~10 --reverse
-:CodeDiff history origin/main..HEAD -r
-:CodeDiff history HEAD~20 % --reverse
+:CorkDiff history --reverse
+:CorkDiff history HEAD~10 --reverse
+:CorkDiff history origin/main..HEAD -r
+:CorkDiff history HEAD~20 % --reverse
 
 " Compare each commit against the current working tree
-:CodeDiff history --base WORKING
+:CorkDiff history --base WORKING
 
 " Compare each commit against HEAD
-:CodeDiff history --base HEAD
+:CorkDiff history --base HEAD
 
 " Line-range history: show only commits that changed the selected lines
 :'<,'>CodeDiff history
@@ -431,7 +454,7 @@ The history panel shows a list of commits. Each commit can be expanded to show i
 **Options:**
 - `--reverse` or `-r`: Show commits in chronological order (oldest first) instead of reverse chronological. Useful for following development story from beginning to end, or reviewing PR changes in the order they were made.
 - `--base` or `-b`: Compare each commit against a fixed revision instead of its parent. Accepts any git revision (`HEAD`, branch name, commit hash) or `WORKING` for the current working tree.
-- `--inline` / `--side-by-side`: Override the diff layout for this invocation. These flags work with all `:CodeDiff` subcommands.
+- `--inline` / `--side-by-side`: Override the diff layout for this invocation. These flags work with all `:CorkDiff` subcommands.
 
 **Visual selection:** When called with a visual range (`:'<,'>CodeDiff history`), only commits that modified the selected lines are shown. This uses `git log -L` under the hood and is useful for tracing the evolution of a specific function or block in a large file.
 
@@ -440,20 +463,20 @@ The history panel shows a list of commits. Each commit can be expanded to show i
 
 ### Git Merge Tool
 
-Use CodeDiff as your git merge tool for resolving conflicts:
+Use CorkDiff as your git merge tool for resolving conflicts:
 
 ```bash
-git config --global merge.tool codediff
-git config --global mergetool.codediff.cmd 'nvim "$MERGED" -c "CodeDiff merge \"$MERGED\""'
+git config --global merge.tool corkdiff
+git config --global mergetool.corkdiff.cmd 'nvim "$MERGED" -c "CorkDiff merge \"$MERGED\""'
 ```
 
 ### Git Diff Tool
 
-Use CodeDiff as your git diff tool for viewing changes:
+Use CorkDiff as your git diff tool for viewing changes:
 
 ```bash
-git config --global diff.tool codediff
-git config --global difftool.codediff.cmd 'nvim "$LOCAL" "$REMOTE" +"CodeDiff file $LOCAL $REMOTE"'
+git config --global diff.tool corkdiff
+git config --global difftool.corkdiff.cmd 'nvim "$LOCAL" "$REMOTE" +"CorkDiff file $LOCAL $REMOTE"'
 ```
 
 Then use `git difftool` to view diffs:
@@ -469,7 +492,7 @@ git difftool -y                   # Skip confirmation prompts
 
 ```lua
 -- Primary user API - setup configuration
-require("codediff").setup({
+require("corkdiff").setup({
   highlights = {
     line_insert = "DiffAdd",
     line_delete = "DiffDelete",
@@ -478,9 +501,9 @@ require("codediff").setup({
 })
 
 -- Advanced usage - direct access to internal modules
-local diff = require("codediff.diff")
-local render = require("codediff.ui")
-local git = require("codediff.git")
+local diff = require("corkdiff.diff")
+local render = require("corkdiff.ui")
+local git = require("corkdiff.git")
 
 -- Example 1: Compute diff between two sets of lines
 local lines_a = {"line 1", "line 2"}
@@ -506,13 +529,13 @@ end)
 
 ### User Autocmd Events
 
-CodeDiff emits `User` autocmd events at key lifecycle points, allowing you to customize behavior without config flags:
+CorkDiff emits `User` autocmd events at key lifecycle points, allowing you to customize behavior without config flags:
 
 | Event | When | Data |
 |-------|------|------|
-| `CodeDiffOpen` | After diff view is fully ready | `tabpage`, `mode` |
-| `CodeDiffClose` | Before cleanup starts | `tabpage`, `mode` |
-| `CodeDiffFileSelect` | When a file is selected in explorer | `tabpage`, `path`, `status` |
+| `CorkDiffOpen` | After diff view is fully ready | `tabpage`, `mode` |
+| `CorkDiffClose` | Before cleanup starts | `tabpage`, `mode` |
+| `CorkDiffFileSelect` | When a file is selected in explorer | `tabpage`, `path`, `status` |
 
 `mode` is one of `"explorer"`, `"standalone"`, or `"history"`.
 
@@ -521,7 +544,7 @@ CodeDiff emits `User` autocmd events at key lifecycle points, allowing you to cu
 
 ```lua
 vim.api.nvim_create_autocmd("User", {
-  pattern = "CodeDiffOpen",
+  pattern = "CorkDiffOpen",
   callback = function()
     for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
       vim.wo[win].cursorline = false
@@ -533,18 +556,18 @@ vim.api.nvim_create_autocmd("User", {
 </details>
 
 <details>
-<summary>Example: Hide tabline while CodeDiff is open</summary>
+<summary>Example: Hide tabline while CorkDiff is open</summary>
 
 ```lua
 vim.api.nvim_create_autocmd("User", {
-  pattern = "CodeDiffOpen",
+  pattern = "CorkDiffOpen",
   callback = function()
     vim.g.codediff_saved_showtabline = vim.o.showtabline
     vim.o.showtabline = 0
   end,
 })
 vim.api.nvim_create_autocmd("User", {
-  pattern = "CodeDiffClose",
+  pattern = "CorkDiffClose",
   callback = function()
     if vim.g.codediff_saved_showtabline then
       vim.o.showtabline = vim.g.codediff_saved_showtabline
@@ -595,13 +618,13 @@ The plugin handles syntax highlighting differently based on buffer type:
 
 The plugin defines highlight groups matching VSCode's diff colors:
 
-- `CodeDiffLineInsert` - Light green background for inserted lines
-- `CodeDiffLineDelete` - Light red background for deleted lines
-- `CodeDiffCharInsert` - Deep/dark green for inserted characters
-- `CodeDiffCharDelete` - Deep/dark red for deleted characters
-- `CodeDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
-- `CodeDiffLineMove` - Background for moved code lines (derived from DiffChange)
-- `CodeDiffMoveTo` - Sign column and annotation color for move indicators
+- `CorkDiffLineInsert` - Light green background for inserted lines
+- `CorkDiffLineDelete` - Light red background for deleted lines
+- `CorkDiffCharInsert` - Deep/dark green for inserted characters
+- `CorkDiffCharDelete` - Deep/dark red for deleted characters
+- `CorkDiffFiller` - Gray foreground for filler line slashes (`╱╱╱`)
+- `CorkDiffLineMove` - Background for moved code lines (derived from DiffChange)
+- `CorkDiffMoveTo` - Sign column and annotation color for move indicators
 
 <details open>
 <summary><b>📸 Visual Examples</b> (click to collapse)</summary>
@@ -681,7 +704,7 @@ For more details on the test structure, see [`tests/README.md`](tests/README.md)
 ### Project Structure
 
 ```
-codediff.nvim/
+corkdiff.nvim/
 ├── libvscode-diff/        # C diff engine
 │   ├── src/               # C implementation
 │   ├── include/           # C headers

@@ -4,6 +4,7 @@ local M = {}
 local accessors = require("codediff.ui.lifecycle.accessors")
 local session = require("codediff.ui.lifecycle.session")
 local state = require("codediff.ui.lifecycle.state")
+local events = require("codediff.ui.events")
 local welcome_window = require("codediff.ui.view.welcome_window")
 
 -- Autocmd group for cleanup
@@ -24,13 +25,9 @@ local function cleanup_diff(tabpage)
   end
 
   -- Emit CodeDiffClose User autocmd
-  vim.api.nvim_exec_autocmds("User", {
-    pattern = "CodeDiffClose",
-    modeline = false,
-    data = {
-      tabpage = tabpage,
-      mode = diff.mode,
-    },
+  events.emit("CodeDiffClose", {
+    tabpage = tabpage,
+    mode = diff.mode,
   })
 
   -- Disable auto-refresh for both buffers

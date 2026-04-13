@@ -31,3 +31,8 @@
 ## Path-Specific Instructions
 
 Path-specific instructions are defined in `.github/copilot-instructions.md` files within respective directories.
+
+## Project Terminology
+
+- When the user mentions `t3code`, it refers to `/home/anoromi/code/stolen/t3code`.
+- When the user mentions `my neovim` or `neovim config`, it refers to `/home/anoromi/.config/nvim`.

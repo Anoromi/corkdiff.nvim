@@ -23,7 +23,7 @@ local function get_layout(session_config, tabpage)
 end
 
 ---@class SessionConfig
----@field mode "standalone"|"explorer"|"history"
+---@field mode "standalone"|"explorer"|"history"|"t3code"
 ---@field git_root string?
 ---@field original_path string
 ---@field modified_path string
@@ -33,7 +33,12 @@ end
 ---@field layout "side-by-side"|"inline"? Optional per-invocation layout override
 ---@field explorer_data table? For explorer mode: { status_result }
 ---@field history_data table? For history mode: { commits, range, file_path, line_range }
+---@field t3code_data table? For t3code mode/session metadata
 ---@field line_range table? For history line-range mode: { start_line, end_line }
+---@field original_content_lines string[]? Injected original-side content
+---@field modified_content_lines string[]? Injected modified-side content
+---@field modified_bufnr number? Injected modified-side live buffer
+---@field reuse_current_tab boolean? Reuse the current tab instead of opening a new one
 
 ---@param session_config SessionConfig Session configuration
 ---@param filetype? string Optional filetype for syntax highlighting

@@ -28,6 +28,8 @@ function M.arrange(tabpage)
   local panel_config
   if mode == "history" then
     panel_config = config.options.history or {}
+  elseif mode == "t3code" then
+    panel_config = config.options.t3code or {}
   else
     panel_config = config.options.explorer or {}
   end

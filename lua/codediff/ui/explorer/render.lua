@@ -8,6 +8,7 @@ local nodes_module = require("codediff.ui.explorer.nodes")
 local tree_module = require("codediff.ui.explorer.tree")
 local keymaps_module = require("codediff.ui.explorer.keymaps")
 local refresh_module = require("codediff.ui.explorer.refresh")
+local events = require("codediff.ui.events")
 local welcome = require("codediff.ui.welcome")
 
 local function should_show_welcome(explorer)
@@ -192,14 +193,10 @@ function M.create(status_result, git_root, tabpage, width, base_revision, target
     local jump = not opts.no_jump and config.options.diff.jump_to_first_change
 
     -- Emit CodeDiffFileSelect User autocmd
-    vim.api.nvim_exec_autocmds("User", {
-      pattern = "CodeDiffFileSelect",
-      modeline = false,
-      data = {
-        tabpage = tabpage,
-        path = file_path,
-        status = file_data.status,
-      },
+    events.emit("CodeDiffFileSelect", {
+      tabpage = tabpage,
+      path = file_path,
+      status = file_data.status,
     })
 
     -- Dir mode: Compare files from dir1 vs dir2 (no git)

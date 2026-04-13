@@ -6,6 +6,8 @@
 local M = {}
 
 local api = vim.api
+local events = require("codediff.ui.events")
+local buffer_highlighting = require("codediff.core.buffer_highlighting")
 
 -- Helper function to load content into a virtual buffer and fire the loaded event
 local function load_virtual_buffer_content(buf, git_root, commit, filepath)
@@ -30,10 +32,7 @@ local function load_virtual_buffer_content(buf, git_root, commit, filepath)
         vim.diagnostic.enable(false, { bufnr = buf })
 
         -- Fire loaded event so diff rendering proceeds
-        api.nvim_exec_autocmds("User", {
-          pattern = "CodeDiffVirtualFileLoaded",
-          data = { buf = buf },
-        })
+        events.emit("CodeDiffVirtualFileLoaded", { buf = buf })
         return
       end
 
@@ -55,24 +54,9 @@ local function load_virtual_buffer_content(buf, git_root, commit, filepath)
       -- to attach and send textDocument/didOpen with codediff:// URI,
       -- crashing language servers that can't handle custom URI schemes.
       local ft = vim.filetype.match({ filename = filepath, buf = buf })
-      if ft then
-        local lang = vim.treesitter.language.get_lang(ft) or ft
-        if pcall(vim.treesitter.start, buf, lang) then
-          -- Store filetype for semantic_tokens without firing autocmds
-          vim.bo[buf].syntax = ""
-        else
-          -- TreeSitter parser not available, fall back to syntax highlighting
-          vim.bo[buf].syntax = ft
-        end
-      end
+      buffer_highlighting.apply_scratch_highlighting(buf, ft)
 
-      -- Disable diagnostics for this buffer completely
-      vim.diagnostic.enable(false, { bufnr = buf })
-
-      api.nvim_exec_autocmds("User", {
-        pattern = "CodeDiffVirtualFileLoaded",
-        data = { buf = buf },
-      })
+      events.emit("CodeDiffVirtualFileLoaded", { buf = buf })
     end)
   end)
 end
@@ -91,7 +75,7 @@ function M.refresh_buffer(buf)
 end
 
 -- Create a fugitive-style URL for a git revision
--- Format: codediff:///<git-root>///<commit>/<filepath>
+-- Format: corkdiff:///<git-root>///<commit>/<filepath>
 -- Supports commit hash or :0 (staged index)
 function M.create_url(git_root, commit, filepath)
   -- Normalize and encode components
@@ -104,48 +88,48 @@ function M.create_url(git_root, commit, filepath)
   local encoded_commit = commit or "HEAD"
   local encoded_path = filepath:gsub("^/", "")
 
-  return string.format("codediff:///%s///%s/%s", encoded_root, encoded_commit, encoded_path)
+  return string.format("corkdiff:///%s///%s/%s", encoded_root, encoded_commit, encoded_path)
 end
 
--- Parse a codediff:// URL
+-- Parse a corkdiff:// or codediff:// URL
 -- Returns: git_root, commit, filepath
 function M.parse_url(url)
+  local scheme = url:match("^([a-z%-]+):///")
+  if scheme ~= "corkdiff" and scheme ~= "codediff" then
+    return nil, nil, nil
+  end
+
   -- Pattern accepts SHA hash (hex chars)
-  local pattern = "^codediff:///(.-)///([a-fA-F0-9]+)/(.+)$"
+  local pattern = "^[a-z%-]+:///(.-)///([a-fA-F0-9]+)/(.+)$"
   local git_root, commit, filepath = url:match(pattern)
   if git_root and commit and filepath then
     return git_root, commit, filepath
   end
 
   -- Try SHA with ^ suffix (parent commit reference)
-  local pattern_parent = "^codediff:///(.-)///([a-fA-F0-9]+%^)/(.+)$"
+  local pattern_parent = "^[a-z%-]+:///(.-)///([a-fA-F0-9]+%^)/(.+)$"
   git_root, commit, filepath = url:match(pattern_parent)
   if git_root and commit and filepath then
     return git_root, commit, filepath
   end
 
   -- Try symbolic ref pattern (HEAD, branch names, etc.)
-  local pattern_symbolic = "^codediff:///(.-)///([A-Za-z][A-Za-z0-9_~^%-]*)/(.+)$"
+  local pattern_symbolic = "^[a-z%-]+:///(.-)///([A-Za-z][A-Za-z0-9_~^%-]*)/(.+)$"
   git_root, commit, filepath = url:match(pattern_symbolic)
   if git_root and commit and filepath then
     return git_root, commit, filepath
   end
 
   -- Try :N or :N: pattern for staged index (supports :0, :1:, :2:, :3:)
-  local pattern_staged = "^codediff:///(.-)///(:[0-9]:?)/(.+)$"
+  local pattern_staged = "^[a-z%-]+:///(.-)///(:[0-9]:?)/(.+)$"
   git_root, commit, filepath = url:match(pattern_staged)
   return git_root, commit, filepath
 end
 
--- Setup the BufReadCmd autocmd to handle codediff:// URLs
-function M.setup()
-  -- Create autocmd group
-  local group = api.nvim_create_augroup("CodeDiffVirtualFile", { clear = true })
-
-  -- Handle reading codediff:// URLs
+local function register_scheme_autocmds(group, scheme)
   api.nvim_create_autocmd("BufReadCmd", {
     group = group,
-    pattern = "codediff:///*",
+    pattern = scheme .. ":///*",
     callback = function(args)
       local url = args.match
       local buf = args.buf
@@ -153,7 +137,7 @@ function M.setup()
       local git_root, commit, filepath = M.parse_url(url)
 
       if not git_root or not commit or not filepath then
-        vim.notify("Invalid codediff URL: " .. url, vim.log.levels.ERROR)
+        vim.notify("Invalid corkdiff URL: " .. url, vim.log.levels.ERROR)
         return
       end
 
@@ -163,7 +147,7 @@ function M.setup()
 
       -- Clear any auto-detected filetype without firing FileType autocmd.
       -- Neovim's built-in filetype detection matches the .js/.ts/.tf extension
-      -- in codediff:// URLs and sets filetype, which triggers LSP plugins to
+      -- in corkdiff:// URLs and sets filetype, which triggers LSP plugins to
       -- attach and crash on the custom URI scheme.
       vim.cmd("noautocmd setlocal filetype=")
 
@@ -172,14 +156,21 @@ function M.setup()
     end,
   })
 
-  -- Prevent writing to these buffers
   api.nvim_create_autocmd("BufWriteCmd", {
     group = group,
-    pattern = "codediff:///*",
+    pattern = scheme .. ":///*",
     callback = function()
       vim.notify("Cannot write to git revision buffer", vim.log.levels.WARN)
     end,
   })
+end
+
+function M.setup()
+  -- Create autocmd group
+  local group = api.nvim_create_augroup("CorkDiffVirtualFile", { clear = true })
+
+  register_scheme_autocmds(group, "corkdiff")
+  register_scheme_autocmds(group, "codediff")
 end
 
 return M

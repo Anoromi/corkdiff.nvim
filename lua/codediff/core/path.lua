@@ -29,7 +29,12 @@ function M.get_plugin_root()
 
   -- Strategy 2: Search runtimepath for our plugin
   for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
-    if path:match("vscode%-diff%.nvim$") or path:match("vscode%-diff$") or path:match("codediff%.nvim$") or path:match("codediff$") then
+    if path:match("vscode%-diff%.nvim$")
+        or path:match("vscode%-diff$")
+        or path:match("codediff%.nvim$")
+        or path:match("codediff$")
+        or path:match("corkdiff%.nvim$")
+        or path:match("corkdiff$") then
       if vim.fn.filereadable(path .. "/VERSION") == 1 then
         _plugin_root = path
         return _plugin_root

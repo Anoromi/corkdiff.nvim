@@ -2,7 +2,7 @@
 local M = {}
 
 -- Subcommands available for :CodeDiff
-M.SUBCOMMANDS = { "merge", "file", "dir", "history", "install" }
+M.SUBCOMMANDS = { "merge", "file", "dir", "history", "install", "t3code" }
 
 local git = require("codediff.core.git")
 local lifecycle = require("codediff.ui.lifecycle")
@@ -769,6 +769,12 @@ function M.vscode_diff(opts)
     end
 
     handle_history(range, file_path, flags, line_range, global_opts)
+  elseif subcommand == "t3code" then
+    local t3code_opts = vim.tbl_extend("force", {}, global_opts)
+    if args[2] and args[2] ~= "" then
+      t3code_opts.thread_id = args[2]
+    end
+    require("codediff.t3code.session").open(t3code_opts)
   elseif subcommand == "install" or subcommand == "install!" then
     -- :CodeDiff install or :CodeDiff install!
     -- Handle both :CodeDiff! install and :CodeDiff install!
