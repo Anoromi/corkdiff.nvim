@@ -142,17 +142,19 @@ describe("t3code transport", function()
     local socket = { messages = {} }
     local original_encode = vim.json.encode
     vim.json.encode = function(payload)
-      socket.messages = {
-        original_encode({ _tag = "Ping" }),
-        original_encode({
-          _tag = "Exit",
-          requestId = payload.id,
-          exit = {
-            _tag = "Success",
-            value = { ok = true },
-          },
-        }),
-      }
+      if payload._tag == "Request" then
+        socket.messages = {
+          original_encode({ _tag = "Ping" }),
+          original_encode({
+            _tag = "Exit",
+            requestId = payload.id,
+            exit = {
+              _tag = "Success",
+              value = { ok = true },
+            },
+          }),
+        }
+      end
       return original_encode(payload)
     end
 

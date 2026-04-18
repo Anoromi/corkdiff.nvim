@@ -147,6 +147,9 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
       default_layout = "inline",
       use_live_buffer = true,
       request_timeout = 10,
+      auto_refresh = true,      -- Refresh active thread when t3code emits checkpoint events
+      refresh_debounce_ms = 250,
+      reconnect_delay_ms = 1000, -- Retry the event stream, then do one catch-up refresh
     },
 
     -- Keymaps in diff view
@@ -234,6 +237,9 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 - `live` mode uses the real current file buffer, so editing and LSP stay intact
 - `history` mode opens full checkpoint file content and is read-only / non-LSP
 - `inline` is the default layout for `t3code` sessions
+- active sessions auto-refresh from `t3code` orchestration events
+- if the stream disconnects, corkdiff reconnects and does one catch-up snapshot refresh
+- `R` still forces a manual refresh
 
 The C library will be downloaded automatically on first use. No `build` step needed!
 

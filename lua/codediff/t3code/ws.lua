@@ -123,7 +123,11 @@ function M.connect(url, opts)
 
   opts = opts or {}
   local ws = websocket.new_from_uri(url)
-  local ok, connect_err = ws:connect(opts.timeout or 10)
+  local timeout = opts.timeout
+  if timeout == nil then
+    timeout = 10
+  end
+  local ok, connect_err = ws:connect(timeout)
   if not ok then
     return nil, string.format("websocket connect failed for %s: %s", url, tostring(connect_err))
   end
@@ -132,7 +136,10 @@ function M.connect(url, opts)
 end
 
 function M.send(socket, payload, timeout)
-  local ok, err = socket:send(payload, "text", timeout or 10)
+  if timeout == nil then
+    timeout = 10
+  end
+  local ok, err = socket:send(payload, "text", timeout)
   if not ok then
     return nil, "websocket send failed: " .. tostring(err)
   end
@@ -140,7 +147,10 @@ function M.send(socket, payload, timeout)
 end
 
 function M.receive(socket, timeout)
-  local data, opcode, errno = socket:receive(timeout or 10)
+  if timeout == nil then
+    timeout = 10
+  end
+  local data, opcode, errno = socket:receive(timeout)
   if data == nil then
     local suffix = errno and (" (errno " .. tostring(errno) .. ")") or ""
     return nil, "websocket receive failed: " .. tostring(opcode) .. suffix
@@ -149,6 +159,21 @@ function M.receive(socket, timeout)
     return nil, "unexpected websocket opcode: " .. tostring(opcode)
   end
   return data, nil
+end
+
+function M.pollfd(socket)
+  if not socket or not socket.socket or type(socket.socket.pollfd) ~= "function" then
+    return nil, "websocket pollfd is unavailable"
+  end
+
+  local ok, fd = pcall(function()
+    return socket.socket:pollfd()
+  end)
+  if not ok or fd == nil then
+    return nil, "websocket pollfd is unavailable"
+  end
+
+  return fd, nil
 end
 
 function M.close(socket)

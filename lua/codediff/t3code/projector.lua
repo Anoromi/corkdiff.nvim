@@ -202,6 +202,89 @@ local function get_baseline_ref(thread)
   return git.checkpoint_ref_for_turn(thread.id, 0)
 end
 
+local function get_visible_checkpoint_ref(checkpoint)
+  if not checkpoint then
+    return nil
+  end
+  return checkpoint.visibleCheckpointRef or checkpoint.checkpointRef
+end
+
+local function get_visible_base_turn_count(checkpoint)
+  if not checkpoint then
+    return nil
+  end
+  if checkpoint.visibleBaseTurnCount ~= nil then
+    return checkpoint.visibleBaseTurnCount
+  end
+  return math.max(0, (checkpoint.turnCount or 0) - 1)
+end
+
+local function get_workspace_mutation(thread, turn_count)
+  for _, mutation in ipairs(thread.workspaceMutations or {}) do
+    if mutation.turnCount == turn_count then
+      return mutation
+    end
+  end
+  return nil
+end
+
+local function get_actual_checkpoint_ref(thread, turn_count)
+  if turn_count == 0 then
+    return get_baseline_ref(thread)
+  end
+
+  local checkpoint = get_checkpoint(thread, turn_count)
+  if checkpoint then
+    return checkpoint.checkpointRef
+  end
+
+  local mutation = get_workspace_mutation(thread, turn_count)
+  if mutation then
+    return mutation.actualCheckpointRef
+  end
+
+  return nil
+end
+
+local function list_actual_checkpoints(thread)
+  local by_turn = {
+    [0] = {
+      turnCount = 0,
+      actualCheckpointRef = get_baseline_ref(thread),
+    },
+  }
+
+  for _, checkpoint in ipairs(thread.checkpoints or {}) do
+    by_turn[checkpoint.turnCount] = {
+      turnCount = checkpoint.turnCount,
+      actualCheckpointRef = checkpoint.checkpointRef,
+    }
+  end
+
+  for _, mutation in ipairs(thread.workspaceMutations or {}) do
+    if by_turn[mutation.turnCount] == nil then
+      by_turn[mutation.turnCount] = {
+        turnCount = mutation.turnCount,
+        actualCheckpointRef = mutation.actualCheckpointRef,
+      }
+    end
+  end
+
+  local checkpoints = {}
+  for _, checkpoint in pairs(by_turn) do
+    checkpoints[#checkpoints + 1] = checkpoint
+  end
+  table.sort(checkpoints, function(left, right)
+    return left.turnCount < right.turnCount
+  end)
+  return checkpoints
+end
+
+local function latest_actual_checkpoint(thread)
+  local checkpoints = list_actual_checkpoints(thread)
+  return checkpoints[#checkpoints]
+end
+
 local function build_turn_refs(thread, selected_turn)
   local checkpoints = thread.checkpoints or {}
   local latest = checkpoints[#checkpoints]
@@ -214,7 +297,7 @@ local function build_turn_refs(thread, selected_turn)
       from_turn = 0,
       to_turn = latest.turnCount,
       from_ref = get_baseline_ref(thread),
-      to_ref = latest.checkpointRef,
+      to_ref = get_visible_checkpoint_ref(latest),
     }, nil
   end
 
@@ -222,13 +305,13 @@ local function build_turn_refs(thread, selected_turn)
   if not to_checkpoint then
     return nil, string.format("turn %s not found", tostring(selected_turn))
   end
-  local from_turn = math.max(0, selected_turn - 1)
+  local from_turn = get_visible_base_turn_count(to_checkpoint)
   local from_ref
   if from_turn == 0 then
     from_ref = get_baseline_ref(thread)
   else
     local from_checkpoint = get_checkpoint(thread, from_turn)
-    from_ref = from_checkpoint and from_checkpoint.checkpointRef or nil
+    from_ref = get_visible_checkpoint_ref(from_checkpoint)
   end
   if not from_ref then
     return nil, string.format("turn %s baseline ref not found", tostring(from_turn))
@@ -237,7 +320,7 @@ local function build_turn_refs(thread, selected_turn)
     from_turn = from_turn,
     to_turn = selected_turn,
     from_ref = from_ref,
-    to_ref = to_checkpoint.checkpointRef,
+    to_ref = get_visible_checkpoint_ref(to_checkpoint),
   }, nil
 end
 
@@ -260,12 +343,14 @@ local function fetch_turn_diff(thread, from_turn, to_turn, client, cache)
     result, err = client:request("orchestration.getFullThreadDiff", {
       threadId = thread.id,
       toTurnCount = to_turn,
+      includeSilent = false,
     })
   else
     result, err = client:request("orchestration.getTurnDiff", {
       threadId = thread.id,
       fromTurnCount = from_turn,
       toTurnCount = to_turn,
+      includeSilent = false,
     })
   end
   if not result then
@@ -335,28 +420,31 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
   local segments = seed_segments(before_lines, after_lines)
   local current_path = after_path
 
-  local checkpoints = thread.checkpoints or {}
-  for _, checkpoint in ipairs(checkpoints) do
+  local actual_checkpoints = list_actual_checkpoints(thread)
+  for _, checkpoint in ipairs(actual_checkpoints) do
     if checkpoint.turnCount > refs.to_turn then
       local prev_turn = checkpoint.turnCount - 1
       if prev_turn >= 0 then
-        local step_diff, step_err = fetch_turn_diff(thread, prev_turn, checkpoint.turnCount, client, cache)
-        if step_err then
-          return nil, step_err
+        local prev_ref = get_actual_checkpoint_ref(thread, prev_turn)
+        if not prev_ref then
+          return nil, string.format("checkpoint %d is unavailable", prev_turn)
         end
-        local entries = patch.parse_files(step_diff.diff or "")
+
+        local entries, entries_err = git.read_name_status(
+          thread.repo_root,
+          prev_ref,
+          checkpoint.actualCheckpointRef
+        )
+        if not entries then
+          return nil, entries_err
+        end
+
         local matched = patch.find_entry_for_path(entries, current_path)
         if matched then
-          local prev_checkpoint = prev_turn == 0 and {
-            checkpointRef = get_baseline_ref(thread),
-          } or get_checkpoint(thread, prev_turn)
-          if not prev_checkpoint then
-            return nil, string.format("checkpoint %d is unavailable", prev_turn)
-          end
           local step_before_path = matched.old_path or matched.path
           local step_after_path = matched.path
-          local step_before_lines = select(1, git.read_file_lines(thread.repo_root, prev_checkpoint.checkpointRef, step_before_path))
-          local step_after_lines = select(1, git.read_file_lines(thread.repo_root, checkpoint.checkpointRef, step_after_path))
+          local step_before_lines = select(1, git.read_file_lines(thread.repo_root, prev_ref, step_before_path))
+          local step_after_lines = select(1, git.read_file_lines(thread.repo_root, checkpoint.actualCheckpointRef, step_after_path))
           local computed = git.compute_diff(step_before_lines, step_after_lines)
           segments = transform_segments(segments, computed.changes or {})
           current_path = step_after_path
@@ -365,12 +453,16 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
     end
   end
 
-  local latest_checkpoint = checkpoints[#checkpoints]
+  local latest_checkpoint = latest_actual_checkpoint(thread)
   if not latest_checkpoint then
     return nil, "thread has no latest checkpoint"
   end
 
-  local latest_lines = select(1, git.read_file_lines(thread.repo_root, latest_checkpoint.checkpointRef, current_path))
+  local latest_lines = select(1, git.read_file_lines(
+    thread.repo_root,
+    latest_checkpoint.actualCheckpointRef,
+    current_path
+  ))
   local abs_path = current_abs_path(thread.repo_root, current_path)
   if vim.fn.filereadable(abs_path) ~= 1 and vim.fn.bufnr(abs_path) == -1 then
     return nil, "current file is unavailable"

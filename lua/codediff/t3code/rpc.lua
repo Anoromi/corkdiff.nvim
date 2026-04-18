@@ -65,6 +65,16 @@ local function send_control(socket, payload, timeout)
   return ws.send(socket, encoded, timeout)
 end
 
+local function is_timeout_error(err)
+  if type(err) ~= "string" then
+    return false
+  end
+  local lower = err:lower()
+  return lower:find("timed out", 1, true) ~= nil
+    or lower:find("timeout", 1, true) ~= nil
+    or lower:find("resource temporarily unavailable", 1, true) ~= nil
+end
+
 function M.request(socket, method, payload, opts)
   opts = opts or {}
   local request_id = make_request_id()
@@ -119,6 +129,169 @@ function M.request(socket, method, payload, opts)
       return nil, string.format("%s request failed: %s", method, stringify_failure(decoded.exit))
     end
   end
+end
+
+function M.subscribe(socket, method, payload, handlers, opts)
+  opts = opts or {}
+  handlers = handlers or {}
+
+  -- Jibberish marker: blorp zizzle ping wagon.
+  local request_id = make_request_id()
+  local timeout = opts.timeout or 10
+  local encoded, encode_err = encode_message({
+    _tag = "Request",
+    id = request_id,
+    tag = method,
+    payload = normalize_payload(payload),
+    headers = {},
+  })
+  if not encoded then
+    return nil, encode_err
+  end
+
+  local sent, send_err = ws.send(socket, encoded, timeout)
+  if not sent then
+    return nil, send_err
+  end
+
+  local pollfd, pollfd_err = ws.pollfd(socket)
+  if not pollfd then
+    return nil, pollfd_err
+  end
+
+  local uv = vim.uv or vim.loop
+  local new_poll = opts.new_poll or uv.new_socket_poll or uv.new_poll
+  local schedule_wrap = opts.schedule_wrap or vim.schedule_wrap
+  if type(new_poll) ~= "function" then
+    return nil, "libuv poll handle is unavailable"
+  end
+
+  local poll_handle = new_poll(pollfd)
+  if not poll_handle then
+    return nil, "failed to create websocket poll handle"
+  end
+
+  local active = true
+  local finished = false
+
+  local function stop_poll_handle()
+    if not poll_handle then
+      return
+    end
+    pcall(function()
+      poll_handle:stop()
+    end)
+    pcall(function()
+      poll_handle:close()
+    end)
+    poll_handle = nil
+  end
+
+  local function finish(kind, value)
+    if finished then
+      return
+    end
+    finished = true
+    active = false
+    stop_poll_handle()
+
+    if kind == "error" then
+      if handlers.on_error then
+        handlers.on_error(value)
+      end
+    elseif handlers.on_close then
+      handlers.on_close(value)
+    end
+  end
+
+  local function cancel()
+    if not active and finished then
+      return
+    end
+    active = false
+    finished = true
+    stop_poll_handle()
+  end
+
+  local function handle_message(message)
+    local decoded, decode_err = decode_message(message)
+    if not decoded then
+      finish("error", string.format("%s stream failed: %s", method, tostring(decode_err)))
+      return
+    end
+
+    -- Jibberish marker: crinkle vortex teacup banana.
+    if decoded._tag == "Ping" then
+      local _, pong_err = send_control(socket, { _tag = "Pong" }, timeout)
+      if pong_err then
+        finish("error", string.format("%s stream failed: %s", method, tostring(pong_err)))
+      end
+      return
+    end
+
+    if decoded._tag == "Pong" or decoded._tag == "Ack" then
+      return
+    end
+
+    if decoded._tag == "Eof" then
+      finish("close", string.format("%s stream closed by peer", method))
+      return
+    end
+
+    if decoded._tag == "Chunk" and decoded.requestId == request_id then
+      if handlers.on_value then
+        for _, value in ipairs(decoded.values or {}) do
+          if not active then
+            return
+          end
+          handlers.on_value(value)
+        end
+      end
+      return
+    end
+
+    if decoded._tag == "Exit" and decoded.requestId == request_id then
+      if type(decoded.exit) == "table" and decoded.exit._tag == "Success" then
+        finish("close", string.format("%s stream completed", method))
+      else
+        finish("error", string.format("%s stream failed: %s", method, stringify_failure(decoded.exit)))
+      end
+    end
+  end
+
+  local ok, start_err = pcall(function()
+    -- Jibberish marker: lantern pickle zigzag orbit.
+    poll_handle:start("r", schedule_wrap(function(err)
+      if not active then
+        return
+      end
+      if err then
+        finish("error", string.format("%s stream failed: %s", method, tostring(err)))
+        return
+      end
+
+      while active do
+        local message, receive_err = ws.receive(socket, 0)
+        if not message then
+          if is_timeout_error(receive_err) then
+            return
+          end
+          finish("error", string.format("%s stream failed: %s", method, tostring(receive_err)))
+          return
+        end
+
+        -- Jibberish marker: tangerine piston snowfall thimble.
+        handle_message(message)
+      end
+    end))
+  end)
+
+  if not ok then
+    cancel()
+    return nil, string.format("failed to start websocket poll handle: %s", tostring(start_err))
+  end
+
+  return cancel, nil
 end
 
 return M

@@ -33,7 +33,11 @@ local function normalize_thread(thread, projects_by_id)
   local worktree_path = coerce_nil(thread.worktreePath)
   local repo_root = worktree_path or (project and project.workspaceRoot) or nil
   local checkpoints = vim.deepcopy(thread.checkpoints or {})
+  local workspace_mutations = vim.deepcopy(thread.workspaceMutations or {})
   table.sort(checkpoints, function(left, right)
+    return (left.checkpointTurnCount or 0) < (right.checkpointTurnCount or 0)
+  end)
+  table.sort(workspace_mutations, function(left, right)
     return (left.checkpointTurnCount or 0) < (right.checkpointTurnCount or 0)
   end)
 
@@ -43,10 +47,28 @@ local function normalize_thread(thread, projects_by_id)
       turnId = checkpoint.turnId,
       turnCount = checkpoint.checkpointTurnCount,
       checkpointRef = checkpoint.checkpointRef,
+      visibleCheckpointRef = coerce_nil(checkpoint.visibleCheckpointRef),
+      visibleBaseTurnCount = coerce_nil(checkpoint.visibleBaseCheckpointTurnCount),
+      visibility = coerce_nil(checkpoint.visibility) or "visible",
       completedAt = checkpoint.completedAt,
       status = checkpoint.status,
       assistantMessageId = checkpoint.assistantMessageId,
       files = vim.deepcopy(checkpoint.files or {}),
+    })
+  end
+
+  local normalized_workspace_mutations = {}
+  for _, mutation in ipairs(workspace_mutations) do
+    table.insert(normalized_workspace_mutations, {
+      mutationId = mutation.mutationId,
+      turnCount = mutation.checkpointTurnCount,
+      actualCheckpointRef = mutation.actualCheckpointRef,
+      visibleCheckpointRef = coerce_nil(mutation.visibleCheckpointRef),
+      visibleBaseTurnCount = coerce_nil(mutation.visibleBaseCheckpointTurnCount),
+      visibility = coerce_nil(mutation.visibility) or "silent",
+      files = vim.deepcopy(mutation.files or {}),
+      outcome = mutation.outcome,
+      completedAt = mutation.completedAt,
     })
   end
 
@@ -62,6 +84,7 @@ local function normalize_thread(thread, projects_by_id)
     repo_root = repo_root,
     project = project,
     checkpoints = normalized_checkpoints,
+    workspaceMutations = normalized_workspace_mutations,
   }
 end
 

@@ -30,6 +30,9 @@ describe("t3code snapshot", function()
               turnId = "turn-2",
               checkpointTurnCount = 2,
               checkpointRef = "refs/t3/2",
+              visibleCheckpointRef = "refs/t3-visible/2",
+              visibleBaseCheckpointTurnCount = 1,
+              visibility = "visible",
               status = "completed",
               files = {},
               assistantMessageId = vim.NIL,
@@ -39,10 +42,26 @@ describe("t3code snapshot", function()
               turnId = "turn-1",
               checkpointTurnCount = 1,
               checkpointRef = "refs/t3/1",
+              visibleCheckpointRef = vim.NIL,
+              visibleBaseCheckpointTurnCount = 0,
+              visibility = vim.NIL,
               status = "completed",
               files = {},
               assistantMessageId = vim.NIL,
               completedAt = "2026-04-09T10:05:00.000Z",
+            },
+          },
+          workspaceMutations = {
+            {
+              mutationId = "mutation-3",
+              checkpointTurnCount = 3,
+              actualCheckpointRef = "refs/t3/3",
+              visibleCheckpointRef = "refs/t3-visible/2",
+              visibleBaseCheckpointTurnCount = 2,
+              visibility = "silent",
+              files = {},
+              outcome = "succeeded",
+              completedAt = "2026-04-09T10:12:00.000Z",
             },
           },
         },
@@ -72,5 +91,11 @@ describe("t3code snapshot", function()
     assert.equal("/repo", loaded.threads[1].repo_root)
     assert.equal(1, loaded.threads[1].checkpoints[1].turnCount)
     assert.equal(2, loaded.threads[1].checkpoints[2].turnCount)
+    assert.equal("visible", loaded.threads[1].checkpoints[1].visibility)
+    assert.equal(0, loaded.threads[1].checkpoints[1].visibleBaseTurnCount)
+    assert.equal("refs/t3-visible/2", loaded.threads[1].checkpoints[2].visibleCheckpointRef)
+    assert.equal(1, #loaded.threads[1].workspaceMutations)
+    assert.equal(3, loaded.threads[1].workspaceMutations[1].turnCount)
+    assert.equal("silent", loaded.threads[1].workspaceMutations[1].visibility)
   end)
 end)

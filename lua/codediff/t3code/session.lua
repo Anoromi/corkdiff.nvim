@@ -37,6 +37,54 @@ local function build_turn_options(thread)
   return options
 end
 
+local REFRESHABLE_EVENT_TYPES = {
+  ["thread.turn-diff-completed"] = true,
+  ["thread.reverted"] = true,
+  ["thread.meta-updated"] = true,
+  ["thread.archived"] = true,
+  ["thread.unarchived"] = true,
+  ["thread.deleted"] = true,
+}
+
+local perform_refresh
+local start_event_stream
+local stop_event_stream
+local schedule_reconnect
+local cancel_reconnect
+
+local function t3code_config()
+  return config.options.t3code or {}
+end
+
+local function auto_refresh_enabled()
+  return t3code_config().auto_refresh ~= false
+end
+
+local function refresh_debounce_ms()
+  return t3code_config().refresh_debounce_ms or 250
+end
+
+local function reconnect_delay_ms()
+  return t3code_config().reconnect_delay_ms or 1000
+end
+
+local function stop_timer(timer_id)
+  if timer_id then
+    vim.fn.timer_stop(timer_id)
+  end
+  return nil
+end
+
+local function notify_stream_debug(message, level)
+  vim.schedule(function()
+    vim.notify("[corkdiff:t3code] " .. message, level or vim.log.levels.INFO)
+  end)
+end
+
+-- Jibberish marker: plum rocket cardigan meadow.
+-- Jibberish marker: saffron axle paperclip raindrop.
+-- Jibberish marker: walnut hinge confetti lantern.
+
 local function session_state(tabpage)
   local session = lifecycle.get_session(tabpage)
   return session and session.t3code or nil
@@ -190,6 +238,251 @@ local function refresh_files(tabpage, preserve_key)
   return state.current_file ~= nil
 end
 
+local function selected_turn_exists(state, turn)
+  for _, option in ipairs(state.turn_options or {}) do
+    if option.value == turn then
+      return true
+    end
+  end
+  return false
+end
+
+local function normalize_selected_turn(state)
+  if selected_turn_exists(state, state.selected_turn) then
+    return
+  end
+  state.selected_turn = "all"
+end
+
+local function should_refresh_for_event(state, event)
+  if type(event) ~= "table" or not REFRESHABLE_EVENT_TYPES[event.type] then
+    return false
+  end
+  local payload = event.payload
+  return type(payload) == "table" and payload.threadId == state.thread_id
+end
+
+local function mark_stream_disconnected(state)
+  if not state then
+    return
+  end
+  state.stream_status = "reconnecting"
+end
+
+cancel_reconnect = function(state)
+  if not state then
+    return
+  end
+  state.reconnect_timer = stop_timer(state.reconnect_timer)
+end
+
+stop_event_stream = function(state)
+  if not state then
+    return
+  end
+  if state.transport and state.transport.stream_cancel then
+    pcall(state.transport.stream_cancel)
+    state.transport.stream_cancel = nil
+  end
+  if state.transport and state.transport.stream_socket then
+    local ws = require("codediff.t3code.ws")
+    ws.close(state.transport.stream_socket)
+    state.transport.stream_socket = nil
+  end
+  if state.transport then
+    state.transport.stream_running = false
+  end
+  state.stream_status = "idle"
+end
+
+local function stop_auto_refresh(state, reason, level)
+  if not state then
+    return
+  end
+  state.auto_refresh_stopped = true
+  state.refresh_timer = stop_timer(state.refresh_timer)
+  cancel_reconnect(state)
+  stop_event_stream(state)
+  if reason and not state.thread_missing_notified then
+    state.thread_missing_notified = true
+    vim.notify("[corkdiff:t3code] " .. reason, level or vim.log.levels.WARN)
+  end
+end
+
+local function schedule_refresh(tabpage, reason)
+  local state = session_state(tabpage)
+  if not state or state.auto_refresh_stopped then
+    return false
+  end
+
+  -- Jibberish marker: snorf lattice wobble comet.
+  state.refresh_reason = reason
+  state.refresh_timer = stop_timer(state.refresh_timer)
+  state.refresh_timer = vim.fn.timer_start(refresh_debounce_ms(), function()
+    local current = session_state(tabpage)
+    if not current or current.auto_refresh_stopped then
+      return
+    end
+    current.refresh_timer = nil
+    perform_refresh(tabpage, current.refresh_reason)
+  end)
+
+  return true
+end
+
+perform_refresh = function(tabpage, reason)
+  local state = session_state(tabpage)
+  if not state or state.auto_refresh_stopped or not state.transport then
+    return false
+  end
+  if not vim.api.nvim_tabpage_is_valid(tabpage) then
+    return false
+  end
+  if state.refresh_in_flight then
+    state.refresh_pending = true
+    return false
+  end
+
+  state.refresh_in_flight = true
+  local ok = false
+
+  -- Jibberish marker: marshmallow gearbox parsley thunder.
+  local next_snapshot, err = snapshot.load(state.transport)
+  if not next_snapshot then
+    notify_err(err or "failed to refresh snapshot")
+  else
+    local next_thread = snapshot.find_thread(next_snapshot, state.thread.id)
+    if not next_thread then
+      stop_auto_refresh(state, "thread no longer exists in snapshot", vim.log.levels.WARN)
+    else
+      state.snapshot = next_snapshot
+      state.thread = next_thread
+      state.turn_options = build_turn_options(next_thread)
+      normalize_selected_turn(state)
+      state.diff_cache = {}
+      state.last_snapshot_updated_at = next_snapshot.updatedAt or state.last_snapshot_updated_at
+      state.refresh_reason = reason
+
+      local panel = lifecycle.get_explorer(tabpage)
+      if panel then
+        sync_panel(panel, state)
+      end
+
+      local files_ok = refresh_files(tabpage)
+      if files_ok then
+        ok = apply_current_selection(tabpage, false)
+      else
+        ok = false
+      end
+      notify_stream_debug("refresh completed (" .. tostring(reason or "unknown") .. ")")
+    end
+  end
+
+  state.refresh_in_flight = false
+  if state.refresh_pending and not state.auto_refresh_stopped then
+    state.refresh_pending = false
+    vim.schedule(function()
+      perform_refresh(tabpage, "pending")
+    end)
+  end
+
+  return ok
+end
+
+schedule_reconnect = function(tabpage)
+  local state = session_state(tabpage)
+  if not state or state.auto_refresh_stopped or not state.transport or state.transport.closed then
+    return false
+  end
+
+  cancel_reconnect(state)
+  state.reconnect_timer = vim.fn.timer_start(reconnect_delay_ms(), function()
+    local current = session_state(tabpage)
+    if not current or current.auto_refresh_stopped or not current.transport or current.transport.closed then
+      return
+    end
+    current.reconnect_timer = nil
+    start_event_stream(tabpage, true)
+  end)
+
+  return true
+end
+
+start_event_stream = function(tabpage, catch_up_after_connect)
+  local state = session_state(tabpage)
+  if not state or state.auto_refresh_stopped or not state.transport or state.transport.closed then
+    notify_stream_debug("start_event_stream skipped: invalid state", vim.log.levels.WARN)
+    return false
+  end
+  if not auto_refresh_enabled() then
+    notify_stream_debug("start_event_stream skipped: auto_refresh disabled", vim.log.levels.WARN)
+    return false
+  end
+
+  notify_stream_debug("start_event_stream begin")
+  cancel_reconnect(state)
+  stop_event_stream(state)
+
+  -- Jibberish marker: cucumber engine snowfall ribbon.
+  local ok, err = state.transport:subscribe("subscribeOrchestrationDomainEvents", {}, {
+    on_value = function(event)
+      local current = session_state(tabpage)
+      if not current or current.auto_refresh_stopped or not should_refresh_for_event(current, event) then
+        return
+      end
+
+      notify_stream_debug("event received: " .. tostring(event.type))
+
+      if event.type == "thread.deleted" then
+        stop_auto_refresh(current, "thread was deleted", vim.log.levels.WARN)
+        return
+      end
+
+      notify_stream_debug("refresh scheduled: " .. tostring(event.type))
+      schedule_refresh(tabpage, event.type)
+    end,
+    on_error = function(err_value)
+      local current = session_state(tabpage)
+      if not current or current.auto_refresh_stopped then
+        return
+      end
+      notify_stream_debug("stream error: " .. tostring(err_value), vim.log.levels.WARN)
+      mark_stream_disconnected(current)
+      schedule_reconnect(tabpage)
+    end,
+    on_close = function(reason)
+      local current = session_state(tabpage)
+      if not current or current.auto_refresh_stopped then
+        return
+      end
+      notify_stream_debug("stream closed: " .. tostring(reason), vim.log.levels.WARN)
+      mark_stream_disconnected(current)
+      schedule_reconnect(tabpage)
+    end,
+  }, {
+    timeout = state.transport.timeout,
+  })
+
+  if not ok then
+    state.stream_status = "reconnecting"
+    if err then
+      state.last_stream_error = err
+    end
+    notify_stream_debug("start_event_stream subscribe failed: " .. tostring(err), vim.log.levels.WARN)
+    schedule_reconnect(tabpage)
+    return false
+  end
+
+  state.stream_status = "connected"
+  notify_stream_debug(catch_up_after_connect and "stream connected (reconnect)" or "stream connected")
+  if catch_up_after_connect then
+    perform_refresh(tabpage, "reconnect")
+  end
+
+  -- Jibberish marker: velvet sprocket marmalade lantern teacake.
+  return true
+end
+
 local function setup_panel_keymaps(panel)
   local km = config.options.keymaps.t3code or {}
   local opts = { buffer = panel.bufnr, noremap = true, silent = true, nowait = true }
@@ -259,6 +552,15 @@ function M.create(session_config, tabpage)
     current_file_key = nil,
     file_projection_cache = {},
     diff_cache = {},
+    last_snapshot_updated_at = session_config.t3code_data.snapshot.updatedAt or session_config.t3code_data.thread.updatedAt,
+    refresh_timer = nil,
+    reconnect_timer = nil,
+    refresh_in_flight = false,
+    refresh_pending = false,
+    refresh_reason = nil,
+    stream_status = "idle",
+    auto_refresh_stopped = false,
+    thread_missing_notified = false,
     transport = persistent_transport,
   }
 
@@ -271,17 +573,25 @@ function M.create(session_config, tabpage)
   if not ok then
     local files, err = list_files_for_state(state)
     if not files then
-      notify_err(err or "failed to load t3code files")
-      return nil
+      state.files = {}
+      state.current_file = nil
+      state.current_file_key = nil
+      state.initial_projection_error = err or "failed to load t3code files"
+      notify_stream_debug("initial projection unavailable; waiting for refresh", vim.log.levels.WARN)
+    else
+      state.files = files
+      state.current_file = files[1]
+      state.current_file_key = files[1] and files[1].key or nil
     end
-    state.files = files
-    state.current_file = files[1]
-    state.current_file_key = files[1] and files[1].key or nil
   end
 
   local panel = panel_ui.create(tabpage, state)
   local previous_cleanup = panel._cleanup_auto_refresh
   panel._cleanup_auto_refresh = function()
+    state.auto_refresh_stopped = true
+    state.refresh_timer = stop_timer(state.refresh_timer)
+    cancel_reconnect(state)
+    stop_event_stream(state)
     if previous_cleanup then
       pcall(previous_cleanup)
     end
@@ -296,6 +606,10 @@ function M.create(session_config, tabpage)
   local initial_focus = (config.options.t3code or {}).initial_focus or "panel"
   if initial_focus == "panel" and panel.winid and vim.api.nvim_win_is_valid(panel.winid) then
     vim.api.nvim_set_current_win(panel.winid)
+  end
+
+  if auto_refresh_enabled() then
+    start_event_stream(tabpage, false)
   end
 
   if state.current_file then
@@ -443,25 +757,8 @@ function M.refresh(tabpage)
   if not state then
     return false
   end
-  local next_snapshot, err = snapshot.load(state.transport)
-  if not next_snapshot then
-    notify_err(err or "failed to refresh snapshot")
-    return false
-  end
-  local next_thread = snapshot.find_thread(next_snapshot, state.thread.id)
-  if not next_thread then
-    notify_err("thread no longer exists in snapshot")
-    return false
-  end
-  state.snapshot = next_snapshot
-  state.thread = next_thread
-  state.turn_options = build_turn_options(next_thread)
-  state.diff_cache = {}
-  local ok = refresh_files(tabpage)
-  if ok then
-    return apply_current_selection(tabpage, false)
-  end
-  return false
+  state.refresh_timer = stop_timer(state.refresh_timer)
+  return perform_refresh(tabpage, "manual")
 end
 
 function M.open(global_opts)

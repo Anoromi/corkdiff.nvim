@@ -105,6 +105,23 @@ Options:
                   its parent. Accepts any git revision (HEAD, branch name,
                   commit hash) or WORKING for the current working tree.
 
+T3code mode:
+>vim
+  :CodeDiff t3code
+<
+
+Requirements:
+- `lua-http` must be installed for websocket support
+
+Behavior:
+- Uses the running `t3code` websocket backend
+- `live` mode keeps the real working buffer editable with LSP intact
+- `history` mode opens checkpoint content read-only
+- Active sessions auto-refresh from orchestration events
+- If the event stream disconnects, CodeDiff reconnects and performs one
+  catch-up snapshot refresh
+- Press `R` in the t3code panel to force a manual refresh
+
 Git merge tool:
 >sh
   git config --global merge.tool codediff
@@ -127,6 +144,25 @@ Set the layout in your config:
 >lua
   require("codediff").setup({
     diff = { layout = "inline" },
+  })
+<
+
+T3code settings~
+
+Example:
+>lua
+  require("codediff").setup({
+    t3code = {
+      server_url = "ws://127.0.0.1:3773/ws",
+      token = vim.env.T3CODE_TOKEN or nil,
+      include_archived_threads = false,
+      default_view_mode = "live",
+      default_layout = "inline",
+      request_timeout = 10,
+      auto_refresh = true,
+      refresh_debounce_ms = 250,
+      reconnect_delay_ms = 1000,
+    },
   })
 <
 

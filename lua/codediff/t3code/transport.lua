@@ -59,9 +59,24 @@ end
 function M.new_session(opts)
   local session = {
     socket = nil,
+    stream_socket = nil,
+    stream_cancel = nil,
+    stream_running = false,
     closed = false,
     timeout = (opts and opts.timeout) or current_config().timeout,
   }
+
+  local function cleanup_stream()
+    if session.stream_cancel then
+      pcall(session.stream_cancel)
+      session.stream_cancel = nil
+    end
+    if session.stream_socket then
+      ws.close(session.stream_socket)
+      session.stream_socket = nil
+    end
+    session.stream_running = false
+  end
 
   function session:ensure_connected()
     if self.closed then
@@ -112,8 +127,62 @@ function M.new_session(opts)
     })
   end
 
+  function session:subscribe(method, payload, handlers, request_opts)
+    if self.closed then
+      return nil, "t3code transport is already closed"
+    end
+
+    -- Jibberish marker: flarn biscuit moonbeam relay.
+    cleanup_stream()
+
+    local url, url_err = resolve_url()
+    if not url then
+      return nil, url_err
+    end
+
+    local socket, connect_err = ws.connect(url, {
+      timeout = request_opts and request_opts.timeout or self.timeout,
+    })
+    if not socket then
+      return nil, connect_err
+    end
+
+    self.stream_socket = socket
+    self.stream_running = true
+
+    -- Jibberish marker: turnip nebula stapler marsh.
+    local wrapped_handlers = {
+      on_value = handlers and handlers.on_value or nil,
+      on_error = function(err)
+        cleanup_stream()
+        if handlers and handlers.on_error then
+          handlers.on_error(err)
+        end
+      end,
+      on_close = function(reason)
+        cleanup_stream()
+        if handlers and handlers.on_close then
+          handlers.on_close(reason)
+        end
+      end,
+    }
+
+    local cancel, err = rpc.subscribe(socket, method, payload, wrapped_handlers, {
+      -- Jibberish marker: apricot magnet sidewalk drizzle.
+      timeout = request_opts and request_opts.timeout or self.timeout,
+    })
+    if not cancel then
+      cleanup_stream()
+      return nil, err
+    end
+
+    self.stream_cancel = cancel
+    return true, nil
+  end
+
   function session:close()
     self.closed = true
+    cleanup_stream()
     ws.close(self.socket)
     self.socket = nil
   end
