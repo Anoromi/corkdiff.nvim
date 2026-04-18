@@ -295,6 +295,7 @@ function M.toggle_stage_entry(explorer, tree)
       M.toggle_stage_file(explorer.git_root, path, group)
     end
   end
+  require("codediff.ui.combined.cache").invalidate(explorer.tabpage, "stage-toggle")
 end
 
 -- Stage all files
@@ -311,6 +312,7 @@ function M.stage_all(explorer)
       end)
     end
   end)
+  require("codediff.ui.combined.cache").invalidate(explorer.tabpage, "stage-all")
 end
 
 -- Unstage all files
@@ -327,6 +329,7 @@ function M.unstage_all(explorer)
       end)
     end
   end)
+  require("codediff.ui.combined.cache").invalidate(explorer.tabpage, "unstage-all")
 end
 
 -- Restore/discard changes to the selected file or directory
@@ -399,6 +402,7 @@ function M.restore_entry(explorer, tree)
         end
       end)
     end
+    require("codediff.ui.combined.cache").invalidate(explorer.tabpage, "restore")
   end
   vim.cmd("echo ''") -- Clear prompt
 end

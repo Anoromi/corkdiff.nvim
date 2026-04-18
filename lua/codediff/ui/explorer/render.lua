@@ -493,6 +493,11 @@ function M.create(status_result, git_root, tabpage, width, base_revision, target
     selected_path = file_data.path
     selected_group = file_data.group
     tree:render()
+    local session = require("codediff.ui.lifecycle").get_session(tabpage)
+    if session and session.layout == "combined" then
+      require("codediff.ui.combined.navigation").jump_to_file(tabpage, file_data)
+      return
+    end
     on_file_select(file_data, opts)
   end
 

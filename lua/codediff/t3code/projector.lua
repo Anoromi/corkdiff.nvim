@@ -189,6 +189,32 @@ local function current_abs_path(repo_root, rel_path)
   return util.path_join(repo_root, rel_path)
 end
 
+local function current_file_signature(repo_root, rel_path)
+  if not repo_root or not rel_path then
+    return ""
+  end
+  local abs_path = current_abs_path(repo_root, rel_path)
+  local bufnr = vim.fn.bufnr(abs_path)
+  if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+    return table.concat({
+      "buf",
+      bufnr,
+      vim.api.nvim_buf_get_changedtick(bufnr),
+      vim.api.nvim_buf_line_count(bufnr),
+    }, ":")
+  end
+  local stat = vim.uv.fs_stat(abs_path)
+  if stat then
+    return table.concat({
+      "file",
+      stat.mtime and stat.mtime.sec or 0,
+      stat.mtime and stat.mtime.nsec or 0,
+      stat.size or 0,
+    }, ":")
+  end
+  return "missing"
+end
+
 local function get_checkpoint(thread, turn_count)
   for _, checkpoint in ipairs(thread.checkpoints or {}) do
     if checkpoint.turnCount == turn_count then
@@ -283,6 +309,18 @@ end
 local function latest_actual_checkpoint(thread)
   local checkpoints = list_actual_checkpoints(thread)
   return checkpoints[#checkpoints]
+end
+
+local function read_projection_file(repo_root, ref, path, opts)
+  opts = opts or {}
+  if opts.absent then
+    return {}, nil
+  end
+  local lines, err = git.read_file_lines(repo_root, ref, path)
+  if err then
+    return nil, err
+  end
+  return lines or {}, nil
 end
 
 local function build_turn_refs(thread, selected_turn)
@@ -389,8 +427,18 @@ function M.build_history_view(thread, entry, selected_turn)
 
   local original_path = entry.old_path or entry.path
   local modified_path = entry.path
-  local original_lines = select(1, git.read_file_lines(thread.repo_root, refs.from_ref, original_path))
-  local modified_lines = select(1, git.read_file_lines(thread.repo_root, refs.to_ref, modified_path))
+  local original_lines, original_err = read_projection_file(thread.repo_root, refs.from_ref, original_path, {
+    absent = entry.status == "A",
+  })
+  if original_err then
+    return nil, "failed to load original content: " .. original_err
+  end
+  local modified_lines, modified_err = read_projection_file(thread.repo_root, refs.to_ref, modified_path, {
+    absent = entry.status == "D",
+  })
+  if modified_err then
+    return nil, "failed to load modified content: " .. modified_err
+  end
 
   return {
     mode = "t3code",
@@ -415,8 +463,18 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
 
   local before_path = entry.old_path or entry.path
   local after_path = entry.path
-  local before_lines = select(1, git.read_file_lines(thread.repo_root, refs.from_ref, before_path))
-  local after_lines = select(1, git.read_file_lines(thread.repo_root, refs.to_ref, after_path))
+  local before_lines, before_err = read_projection_file(thread.repo_root, refs.from_ref, before_path, {
+    absent = entry.status == "A",
+  })
+  if before_err then
+    return nil, "failed to load original content: " .. before_err
+  end
+  local after_lines, after_err = read_projection_file(thread.repo_root, refs.to_ref, after_path, {
+    absent = entry.status == "D",
+  })
+  if after_err then
+    return nil, "failed to load modified content: " .. after_err
+  end
   local segments = seed_segments(before_lines, after_lines)
   local current_path = after_path
 
@@ -443,8 +501,18 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
         if matched then
           local step_before_path = matched.old_path or matched.path
           local step_after_path = matched.path
-          local step_before_lines = select(1, git.read_file_lines(thread.repo_root, prev_ref, step_before_path))
-          local step_after_lines = select(1, git.read_file_lines(thread.repo_root, checkpoint.actualCheckpointRef, step_after_path))
+          local step_before_lines, step_before_err = read_projection_file(thread.repo_root, prev_ref, step_before_path, {
+            absent = matched.status == "A",
+          })
+          if step_before_err then
+            return nil, "failed to load checkpoint original content: " .. step_before_err
+          end
+          local step_after_lines, step_after_err = read_projection_file(thread.repo_root, checkpoint.actualCheckpointRef, step_after_path, {
+            absent = matched.status == "D",
+          })
+          if step_after_err then
+            return nil, "failed to load checkpoint modified content: " .. step_after_err
+          end
           local computed = git.compute_diff(step_before_lines, step_after_lines)
           segments = transform_segments(segments, computed.changes or {})
           current_path = step_after_path
@@ -458,11 +526,10 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
     return nil, "thread has no latest checkpoint"
   end
 
-  local latest_lines = select(1, git.read_file_lines(
-    thread.repo_root,
-    latest_checkpoint.actualCheckpointRef,
-    current_path
-  ))
+  local latest_lines, latest_err = read_projection_file(thread.repo_root, latest_checkpoint.actualCheckpointRef, current_path)
+  if latest_err then
+    return nil, "failed to load latest checkpoint content: " .. latest_err
+  end
   local abs_path = current_abs_path(thread.repo_root, current_path)
   if vim.fn.filereadable(abs_path) ~= 1 and vim.fn.bufnr(abs_path) == -1 then
     return nil, "current file is unavailable"
@@ -486,6 +553,90 @@ function M.build_live_view(thread, entry, selected_turn, client, cache)
       current_path = current_path,
     },
   }, nil
+end
+
+local function combined_projection_cache_key(thread, entry, selected_turn, turn_view_mode)
+  local latest = latest_actual_checkpoint(thread)
+  return table.concat({
+    thread.id or "",
+    selected_turn or "",
+    turn_view_mode or "",
+    entry.key or "",
+    entry.status or "",
+    entry.old_path or "",
+    entry.path or "",
+    latest and latest.turnCount or "",
+    latest and latest.actualCheckpointRef or "",
+    turn_view_mode == "live" and current_file_signature(thread.repo_root, entry.path) or "",
+  }, "::")
+end
+
+function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache)
+  local projection_key = combined_projection_cache_key(thread, entry, selected_turn, turn_view_mode)
+  if projection_cache and projection_cache[projection_key] and not projection_cache[projection_key].load_error then
+    return util.deepcopy(projection_cache[projection_key]), nil
+  end
+
+  local session_config, err
+  if turn_view_mode == "history" then
+    session_config, err = M.build_history_view(thread, entry, selected_turn)
+  else
+    session_config, err = M.build_live_view(thread, entry, selected_turn, client, cache)
+  end
+  if not session_config then
+    return {
+      key = entry.key,
+      path = entry.path,
+      old_path = entry.old_path,
+      status = entry.status,
+      group = "t3code",
+      git_root = thread.repo_root,
+      original_lines = {},
+      modified_lines = {},
+      diff = { changes = {}, moves = {} },
+      editable = false,
+      load_error = err or "failed to build t3code projection",
+    }, nil
+  end
+
+  local file = {
+    key = entry.key,
+    path = session_config.modified_path,
+    old_path = entry.old_path,
+    status = entry.status,
+    group = "t3code",
+    git_root = session_config.git_root,
+    original_revision = session_config.original_revision,
+    modified_revision = session_config.modified_revision,
+    original_lines = session_config.original_content_lines or {},
+    modified_lines = session_config.modified_content_lines
+      or (
+        session_config.modified_bufnr
+          and vim.api.nvim_buf_is_valid(session_config.modified_bufnr)
+          and vim.api.nvim_buf_get_lines(session_config.modified_bufnr, 0, -1, false)
+      )
+      or {},
+    modified_bufnr = session_config.modified_bufnr,
+    editable = session_config.modified_bufnr ~= nil and turn_view_mode ~= "history",
+    readonly_reason = turn_view_mode == "history" and "t3code history sections are readonly" or nil,
+  }
+
+  if projection_cache and not file.load_error then
+    projection_cache[projection_key] = util.deepcopy(file)
+  end
+  return file, nil
+end
+
+function M.build_combined_files(thread, entries, selected_turn, turn_view_mode, client, cache, projection_cache)
+  local files = {}
+  for _, entry in ipairs(entries or {}) do
+    local file, err = M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache)
+    if not file then
+      return nil, err
+    end
+    files[#files + 1] = file
+  end
+  return files, nil
 end
 
 return M

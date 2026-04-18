@@ -67,6 +67,8 @@ local function build_sections(keymaps, is_explorer, is_history, is_t3code, is_co
     table.insert(view_items, { km.hover, "Show deleted/original hunk text" })
   end
   table.insert(view_items, { km.toggle_layout, "Toggle inline/side-by-side layout" })
+  table.insert(view_items, { km.toggle_combined, "Toggle combined all-files view" })
+  table.insert(view_items, { km.toggle_combined_view, "Toggle combined changes/full" })
   if km.align_move then
     table.insert(view_items, { km.align_move, "Align moved code block" })
   end

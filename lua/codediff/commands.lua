@@ -628,6 +628,8 @@ function M.vscode_diff(opts)
       global_opts.layout = "inline"
     elseif arg == "--side-by-side" then
       global_opts.layout = "side-by-side"
+    elseif arg == "--combined" then
+      global_opts.layout = "combined"
     else
       table.insert(args, arg)
     end

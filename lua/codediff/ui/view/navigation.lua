@@ -18,6 +18,10 @@ function M.next_hunk()
     return false
   end
 
+  if session.layout == "combined" then
+    return require("codediff.ui.combined.navigation").next_hunk(tabpage)
+  end
+
   local current_buf = vim.api.nvim_get_current_buf()
   local original_bufnr = session.original_bufnr
   local modified_bufnr = session.modified_bufnr
@@ -84,6 +88,10 @@ function M.prev_hunk()
   local diff_result = session.stored_diff_result
   if not diff_result.changes or #diff_result.changes == 0 then
     return false
+  end
+
+  if session.layout == "combined" then
+    return require("codediff.ui.combined.navigation").prev_hunk(tabpage)
   end
 
   local current_buf = vim.api.nvim_get_current_buf()
@@ -158,6 +166,8 @@ function M.next_file()
 
   if is_t3code_mode then
     require("codediff.t3code.session").navigate_next(panel_obj)
+  elseif session and session.layout == "combined" then
+    require("codediff.ui.combined.navigation").next_file(tabpage)
   elseif is_history_mode then
     local history = require("codediff.ui.history")
     if panel_obj.is_single_file_mode then
@@ -190,6 +200,8 @@ function M.prev_file()
 
   if is_t3code_mode then
     require("codediff.t3code.session").navigate_prev(panel_obj)
+  elseif session and session.layout == "combined" then
+    require("codediff.ui.combined.navigation").prev_file(tabpage)
   elseif is_history_mode then
     local history = require("codediff.ui.history")
     if panel_obj.is_single_file_mode then

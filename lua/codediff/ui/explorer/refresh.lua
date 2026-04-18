@@ -266,8 +266,17 @@ function M.refresh(explorer)
 
       explorer.tree:render()
 
-      -- Update status result for file selection logic
-      explorer.status_result = status_result
+	      -- Update status result for file selection logic
+	      explorer.status_result = status_result
+
+	      local lifecycle = require("codediff.ui.lifecycle")
+	      local session = lifecycle.get_session(explorer.tabpage)
+      local combined_cache = require("codediff.ui.combined.cache")
+      combined_cache.invalidate(explorer.tabpage, "explorer-refresh")
+      combined_cache.precompute(explorer.tabpage)
+	      if session and session.layout == "combined" then
+	        require("codediff.ui.view.combined").rerender(explorer.tabpage, { preserve_cursor = true })
+	      end
 
       local function clear_current_file()
         explorer.current_file_path = nil

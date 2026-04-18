@@ -30,7 +30,7 @@ end
 ---@field original_revision string?
 ---@field modified_revision string?
 ---@field conflict boolean? For merge conflict mode: render both sides against base
----@field layout "side-by-side"|"inline"? Optional per-invocation layout override
+---@field layout "side-by-side"|"inline"|"combined"? Optional per-invocation layout override
 ---@field explorer_data table? For explorer mode: { status_result }
 ---@field history_data table? For history mode: { commits, range, file_path, line_range }
 ---@field t3code_data table? For t3code mode/session metadata
@@ -54,6 +54,9 @@ function M.create(session_config, filetype, on_ready)
   if get_layout(session_config) == "inline" then
     return require("codediff.ui.view.inline_view").create(session_config, filetype, on_ready)
   end
+  if get_layout(session_config) == "combined" then
+    return require("codediff.ui.view.combined").create(session_config, filetype, on_ready)
+  end
 
   return side_by_side.create(session_config, filetype, on_ready)
 end
@@ -67,12 +70,23 @@ function M.update(tabpage, session_config, auto_scroll_to_first_hunk)
   if get_layout(session_config, tabpage) == "inline" then
     return require("codediff.ui.view.inline_view").update(tabpage, session_config, auto_scroll_to_first_hunk)
   end
+  if get_layout(session_config, tabpage) == "combined" then
+    return require("codediff.ui.view.combined").update(tabpage, session_config, auto_scroll_to_first_hunk)
+  end
 
   return side_by_side.update(tabpage, session_config, auto_scroll_to_first_hunk)
 end
 
 function M.toggle_layout(tabpage)
   return require("codediff.ui.view.toggle").toggle(tabpage)
+end
+
+function M.toggle_combined(tabpage)
+  return require("codediff.ui.view.combined").toggle(tabpage)
+end
+
+function M.toggle_combined_view(tabpage)
+  return require("codediff.ui.view.combined").toggle_view(tabpage)
 end
 
 function M.get_current_layout(tabpage)

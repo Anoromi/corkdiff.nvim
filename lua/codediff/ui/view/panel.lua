@@ -33,11 +33,15 @@ function M.setup_explorer(tabpage, session_config, original_win, modified_win)
   if session_config.explorer_data.focus_file then
     explorer_opts.focus_file = session_config.explorer_data.focus_file
   end
+  if session_config.layout == "combined" then
+    explorer_opts.combined = true
+  end
 
-  local explorer_obj =
-    explorer_module.create(status_result, session_config.git_root, tabpage, nil, session_config.original_revision, session_config.modified_revision, explorer_opts)
+	  local explorer_obj =
+	    explorer_module.create(status_result, session_config.git_root, tabpage, nil, session_config.original_revision, session_config.modified_revision, explorer_opts)
 
-  lifecycle.set_explorer(tabpage, explorer_obj)
+	  lifecycle.set_explorer(tabpage, explorer_obj)
+  require("codediff.ui.combined.cache").precompute(tabpage)
 
   local initial_focus = explorer_config.initial_focus or "explorer"
   if initial_focus == "explorer" and explorer_obj and explorer_obj.winid and vim.api.nvim_win_is_valid(explorer_obj.winid) then
@@ -99,8 +103,9 @@ function M.setup_t3code(tabpage, session_config)
     return
   end
 
-  t3code_module.create(session_config, tabpage)
-  layout.arrange(tabpage)
+	  t3code_module.create(session_config, tabpage)
+  require("codediff.ui.combined.cache").precompute(tabpage)
+	  layout.arrange(tabpage)
 end
 
 return M

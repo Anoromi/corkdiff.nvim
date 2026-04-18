@@ -104,6 +104,11 @@ function M.toggle(tabpage)
     return false
   end
 
+  if session.layout == "combined" then
+    vim.notify("Use the combined-view toggle to leave combined view", vim.log.levels.INFO)
+    return false
+  end
+
   local target_layout = session.layout == "inline" and "side-by-side" or "inline"
   local normalize = target_layout == "inline" and normalize_inline_layout or normalize_side_by_side_layout
   local previous_layout = session.layout

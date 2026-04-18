@@ -134,18 +134,53 @@ CONFIGURATION                                        *codediff-configuration*
                                                       *codediff-layout*
 Diff layout~
 
-CodeDiff supports two diff layouts:
+CodeDiff supports three diff layouts:
 
   `"side-by-side"` (default): Two panes with synchronized scrolling.
   `"inline"`: Single pane with deleted lines shown as virtual overlays.
               Includes treesitter syntax highlighting on virtual lines.
+  `"combined"`: Explorer/t3code all-files view in one aggregate buffer.
 
 Set the layout in your config:
 >lua
   require("codediff").setup({
-    diff = { layout = "inline" },
+    diff = {
+      layout = "inline",
+      combined = {
+        initial_view = "changes",
+        context_lines = 3,
+        auto_rebuild_structural_edits = true,
+        precompute = true,
+        precompute_debounce_ms = 120,
+        precompute_files_per_tick = 1,
+      },
+    },
   })
 <
+
+Combined view~
+
+Use combined view to review all changed files in one buffer:
+>
+  :CorkDiff --combined
+  :CorkDiff main --combined
+  :CorkDiff main HEAD --combined
+  :CorkDiff t3code --combined
+<
+
+Press `<M-s>` in an explorer or t3code session to enter or leave combined view.
+Press `<leader>cf` to switch between `changes` mode (hunks plus context) and
+`full` mode (full modified-side file contents).
+
+The combined buffer is editable. Use `:write` to apply editable sections back
+to their source files. Headers, separators, omitted-region lines, deleted
+virtual lines, and readonly sections are rebuilt after write. Staged,
+revision-only, t3code history, and conflict sections are readonly in this first
+implementation. Conflict files should be opened in the normal conflict view.
+
+LSP support is current-file only: CorkDiff maps the cursor back to the source
+file when possible and mirrors diagnostics for visible mapped lines. The mixed
+aggregate buffer itself does not attach multiple language servers.
 
 T3code settings~
 
@@ -195,6 +230,8 @@ Press `t` in a diff view to toggle between side-by-side and inline layout.
 The current file is re-rendered in the new layout automatically. This works
 in all modes (explorer, history, standalone).
 
+Press `<M-s>` to toggle combined view in explorer and t3code sessions.
+
 The toggle keymap can be customized:
 >lua
   require("codediff").setup({
@@ -222,6 +259,14 @@ Setup entry point:
     },
     diff = {
       layout = "side-by-side",
+      combined = {
+        initial_view = "changes",
+        context_lines = 3,
+        auto_rebuild_structural_edits = true,
+        precompute = true,
+        precompute_debounce_ms = 120,
+        precompute_files_per_tick = 1,
+      },
       disable_inlay_hints = true,
       max_computation_time_ms = 5000,
       hide_merge_artifacts = false,
@@ -270,6 +315,8 @@ Setup entry point:
         show_help = "g?",
         align_move = "gm",
         toggle_layout = "t",
+        toggle_combined = "<M-s>",
+        toggle_combined_view = "<leader>cf",
       },
       explorer = {
         select = "<CR>",

@@ -88,7 +88,15 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
 
     -- Diff view behavior
     diff = {
-      layout = "side-by-side",             -- Diff layout: "side-by-side" (two panes) or "inline" (single pane with virtual lines)
+      layout = "side-by-side",             -- "side-by-side", "inline", or "combined"
+      combined = {
+        initial_view = "changes",          -- "changes" (hunks + context) or "full"
+        context_lines = 3,                 -- Context lines around hunks in combined changes view
+        auto_rebuild_structural_edits = true, -- Rebuild headers/separators after :write
+        precompute = true,                 -- Precompute combined projections before toggling
+        precompute_debounce_ms = 120,      -- Debounce precompute after refresh/mutation events
+        precompute_files_per_tick = 1,     -- File projections to build per scheduled tick
+      },
       disable_inlay_hints = true,         -- Disable inlay hints in diff windows for cleaner view
       max_computation_time_ms = 5000,     -- Maximum time for diff computation (VSCode default)
       ignore_trim_whitespace = false,     -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
@@ -174,6 +182,8 @@ https://github.com/user-attachments/assets/64c41f01-dffe-4318-bce4-16eec8de356e
         show_help = "g?",   -- Show floating window with available keymaps
         align_move = "gm", -- Temporarily align moved code blocks across panes
         toggle_layout = "t", -- Toggle between side-by-side and inline layout
+        toggle_combined = "<M-s>", -- Toggle all-files combined view
+        toggle_combined_view = "<leader>cf", -- Toggle combined changes/full view
       },
       explorer = {
         select = "<CR>",    -- Open diff for selected file
@@ -337,7 +347,36 @@ Open an interactive file explorer showing changed files:
 " Override layout for this invocation (works with all subcommands)
 :CorkDiff --inline
 :CorkDiff main --side-by-side
+:CorkDiff --combined
+:CorkDiff main --combined
+:CorkDiff main HEAD --combined
 ```
+
+### Combined View
+
+Combined view renders every changed file into one editable aggregate buffer:
+
+```vim
+:CorkDiff --combined
+:CorkDiff main --combined
+:CorkDiff main HEAD --combined
+:CorkDiff t3code --combined
+```
+
+Use `<M-s>` in an explorer or t3code session to enter or leave combined view.
+Use `<leader>cf` to switch between `changes` mode and `full` mode. `changes`
+mode shows changed hunks with configurable context; `full` mode shows the full
+modified-side content for each file section.
+
+The combined buffer is editable. Write it with `:write` to apply editable
+sections back to their source files. Headers, separators, omitted-region lines,
+deleted virtual lines, and readonly sections are rebuilt after write. Staged,
+revision-only, t3code history, and conflict sections are readonly in this first
+slice. Conflict files should be opened in the normal conflict view.
+
+LSP support is current-file only: CorkDiff maps the cursor back to the source
+file where possible and mirrors diagnostics for visible mapped lines. The mixed
+aggregate buffer itself does not attach multiple language servers.
 
 #### PR-like Diff (Merge-base)
 
@@ -460,7 +499,7 @@ The history panel shows a list of commits. Each commit can be expanded to show i
 **Options:**
 - `--reverse` or `-r`: Show commits in chronological order (oldest first) instead of reverse chronological. Useful for following development story from beginning to end, or reviewing PR changes in the order they were made.
 - `--base` or `-b`: Compare each commit against a fixed revision instead of its parent. Accepts any git revision (`HEAD`, branch name, commit hash) or `WORKING` for the current working tree.
-- `--inline` / `--side-by-side`: Override the diff layout for this invocation. These flags work with all `:CorkDiff` subcommands.
+- `--inline` / `--side-by-side` / `--combined`: Override the diff layout for this invocation. Combined view is supported for explorer and t3code sessions.
 
 **Visual selection:** When called with a visual range (`:'<,'>CodeDiff history`), only commits that modified the selected lines are shown. This uses `git log -L` under the hood and is useful for tracing the evolution of a specific function or block in a large file.
 

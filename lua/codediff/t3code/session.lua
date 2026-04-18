@@ -169,6 +169,11 @@ local function set_current_file(tabpage, file, auto_scroll)
   if panel then
     sync_panel(panel, state)
   end
+  local sess = lifecycle.get_session(tabpage)
+  if sess and sess.layout == "combined" then
+    require("codediff.ui.combined.navigation").jump_to_file(tabpage, file)
+    return
+  end
   apply_current_selection(tabpage, auto_scroll)
 end
 
@@ -193,6 +198,14 @@ local function focus_current_file(tabpage)
       vim.api.nvim_set_current_win(target_win)
     end
   end)
+end
+
+local function precompute_combined(tabpage, invalidate)
+  local combined_cache = require("codediff.ui.combined.cache")
+  if invalidate then
+    combined_cache.invalidate(tabpage, "t3code-refresh")
+  end
+  combined_cache.precompute(tabpage)
 end
 
 local function select_turn_at_cursor(panel)
@@ -232,10 +245,11 @@ local function refresh_files(tabpage, preserve_key)
   state.current_file = chosen or files[1] or nil
   state.current_file_key = state.current_file and state.current_file.key or nil
   local panel = lifecycle.get_explorer(tabpage)
-  if panel then
-    sync_panel(panel, state)
-  end
-  return state.current_file ~= nil
+	  if panel then
+	    sync_panel(panel, state)
+	  end
+  precompute_combined(tabpage, false)
+	  return state.current_file ~= nil
 end
 
 local function selected_turn_exists(state, turn)
@@ -356,24 +370,31 @@ perform_refresh = function(tabpage, reason)
       stop_auto_refresh(state, "thread no longer exists in snapshot", vim.log.levels.WARN)
     else
       state.snapshot = next_snapshot
-      state.thread = next_thread
-      state.turn_options = build_turn_options(next_thread)
-      normalize_selected_turn(state)
-      state.diff_cache = {}
-      state.last_snapshot_updated_at = next_snapshot.updatedAt or state.last_snapshot_updated_at
-      state.refresh_reason = reason
+	      state.thread = next_thread
+	      state.turn_options = build_turn_options(next_thread)
+	      normalize_selected_turn(state)
+	      state.diff_cache = {}
+      state.combined_projection_cache = {}
+	      state.last_snapshot_updated_at = next_snapshot.updatedAt or state.last_snapshot_updated_at
+	      state.refresh_reason = reason
+      precompute_combined(tabpage, true)
 
       local panel = lifecycle.get_explorer(tabpage)
       if panel then
         sync_panel(panel, state)
       end
 
-      local files_ok = refresh_files(tabpage)
-      if files_ok then
-        ok = apply_current_selection(tabpage, false)
-      else
-        ok = false
-      end
+	      local files_ok = refresh_files(tabpage)
+	      if files_ok then
+          local sess = lifecycle.get_session(tabpage)
+          if sess and sess.layout == "combined" then
+            ok = require("codediff.ui.view.combined").rerender(tabpage, { preserve_cursor = true })
+          else
+            ok = apply_current_selection(tabpage, false)
+          end
+	      else
+	        ok = false
+	      end
       notify_stream_debug("refresh completed (" .. tostring(reason or "unknown") .. ")")
     end
   end
@@ -549,9 +570,10 @@ function M.create(session_config, tabpage)
     layout = lifecycle.get_layout(tabpage) or (config.options.t3code or {}).default_layout or "inline",
     files = {},
     current_file = nil,
-    current_file_key = nil,
-    file_projection_cache = {},
-    diff_cache = {},
+	    current_file_key = nil,
+	    file_projection_cache = {},
+	    diff_cache = {},
+    combined_projection_cache = {},
     last_snapshot_updated_at = session_config.t3code_data.snapshot.updatedAt or session_config.t3code_data.thread.updatedAt,
     refresh_timer = nil,
     reconnect_timer = nil,
@@ -614,7 +636,12 @@ function M.create(session_config, tabpage)
 
   if state.current_file then
     vim.schedule(function()
-      apply_current_selection(tabpage, true)
+      local sess = lifecycle.get_session(tabpage)
+      if sess and sess.layout == "combined" then
+        require("codediff.ui.view.combined").rerender(tabpage, { preserve_cursor = true })
+      else
+        apply_current_selection(tabpage, true)
+      end
     end)
   end
 
@@ -625,6 +652,10 @@ function M.rerender_current(panel)
   local state = session_state(panel.tabpage)
   if not state or not state.current_file then
     return false
+  end
+  local sess = lifecycle.get_session(panel.tabpage)
+  if sess and sess.layout == "combined" then
+    return require("codediff.ui.view.combined").rerender(panel.tabpage, { preserve_cursor = true })
   end
   return apply_current_selection(panel.tabpage, false)
 end
@@ -643,6 +674,14 @@ function M.navigate_next(panel)
     end
   end
   index = index % #state.files + 1
+  local sess = lifecycle.get_session(panel.tabpage)
+  if sess and sess.layout == "combined" then
+    state.current_file = vim.deepcopy(state.files[index])
+    state.current_file_key = state.files[index].key
+    sync_panel(panel, state)
+    require("codediff.ui.combined.navigation").jump_to_file(panel.tabpage, state.files[index])
+    return
+  end
   set_current_file(panel.tabpage, state.files[index], true)
 end
 
@@ -662,6 +701,14 @@ function M.navigate_prev(panel)
   index = index - 1
   if index < 1 then
     index = #state.files
+  end
+  local sess = lifecycle.get_session(panel.tabpage)
+  if sess and sess.layout == "combined" then
+    state.current_file = vim.deepcopy(state.files[index])
+    state.current_file_key = state.files[index].key
+    sync_panel(panel, state)
+    require("codediff.ui.combined.navigation").jump_to_file(panel.tabpage, state.files[index])
+    return
   end
   set_current_file(panel.tabpage, state.files[index], true)
 end
@@ -683,24 +730,36 @@ end
 
 function M.toggle_turn_view_mode(tabpage)
   local state = session_state(tabpage)
-  if not state then
-    return false
-  end
-  state.turn_view_mode = state.turn_view_mode == "live" and "history" or "live"
+	  if not state then
+	    return false
+	  end
+  require("codediff.ui.combined.cache").invalidate(tabpage, "t3code-view-mode")
+  state.combined_projection_cache = {}
+	  state.turn_view_mode = state.turn_view_mode == "live" and "history" or "live"
   local panel = lifecycle.get_explorer(tabpage)
   if panel then
     sync_panel(panel, state)
+  end
+  local sess = lifecycle.get_session(tabpage)
+  if sess and sess.layout == "combined" then
+    return require("codediff.ui.view.combined").rerender(tabpage, { preserve_cursor = true })
   end
   return apply_current_selection(tabpage, false)
 end
 
 function M.set_turn(tabpage, turn)
   local state = session_state(tabpage)
-  if not state then
-    return false
-  end
-  state.selected_turn = turn
+	  if not state then
+	    return false
+	  end
+  require("codediff.ui.combined.cache").invalidate(tabpage, "t3code-turn")
+  state.combined_projection_cache = {}
+	  state.selected_turn = turn
   if refresh_files(tabpage) then
+    local sess = lifecycle.get_session(tabpage)
+    if sess and sess.layout == "combined" then
+      return require("codediff.ui.view.combined").rerender(tabpage, { preserve_cursor = true })
+    end
     return apply_current_selection(tabpage, true)
   end
   return false

@@ -29,7 +29,15 @@ M.defaults = {
 
   -- Diff view behavior
   diff = {
-    layout = "side-by-side", -- Diff layout: "side-by-side" or "inline"
+    layout = "side-by-side", -- Diff layout: "side-by-side", "inline", or "combined"
+    combined = {
+      initial_view = "changes", -- "changes" or "full"
+      context_lines = 3, -- Context lines around hunks in changes view
+      auto_rebuild_structural_edits = true, -- Rebuild headers/separators after saving combined edits
+      precompute = true, -- Precompute combined all-files projections before toggling into combined view
+      precompute_debounce_ms = 120, -- Debounce combined precompute after refresh/mutation events
+      precompute_files_per_tick = 1, -- Number of combined file projections to build per scheduled tick
+    },
     disable_inlay_hints = true, -- Disable inlay hints in diff windows for cleaner view
     max_computation_time_ms = 5000, -- Maximum time for diff computation (5 seconds, VSCode default)
     ignore_trim_whitespace = false, -- Ignore leading/trailing whitespace changes (like diffopt+=iwhite)
@@ -119,6 +127,8 @@ M.defaults = {
       align_move = "gm", -- Temporarily align other pane to show paired moved code
       hover = "gk", -- Show deleted/original hunk text in inline mode
       toggle_layout = "t", -- Toggle diff layout for the current codediff session
+      toggle_combined = "<M-s>", -- Toggle combined all-files view for explorer/t3code sessions
+      toggle_combined_view = "<leader>cf", -- Toggle combined view between changes and full files
       show_help = "g?", -- Show floating window with available keymaps
     },
     explorer = {

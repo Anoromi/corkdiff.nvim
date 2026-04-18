@@ -87,13 +87,13 @@ local function complete_diff(arg_lead, cmd_line, _)
 
   if arg_lead:match("^%-") then
     if first_arg == "history" then
-      local result = complete_flags({ "--reverse", "-r", "--base", "-b", "--inline", "--side-by-side" }, arg_lead)
+      local result = complete_flags({ "--reverse", "-r", "--base", "-b", "--inline", "--side-by-side", "--combined" }, arg_lead)
       if result then
         return result
       end
     end
 
-    local result = complete_flags({ "--inline", "--side-by-side" }, arg_lead)
+    local result = complete_flags({ "--inline", "--side-by-side", "--combined" }, arg_lead)
     if result then
       return result
     end

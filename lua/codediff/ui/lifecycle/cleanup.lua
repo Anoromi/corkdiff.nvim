@@ -46,12 +46,16 @@ local function cleanup_diff(tabpage)
   -- Remove tab-scoped keymaps from all tracked buffers
   accessors.clear_tab_keymaps(tabpage)
 
-  -- Call explorer's cleanup function to stop file watchers
-  if diff.explorer and diff.explorer._cleanup_auto_refresh then
-    pcall(diff.explorer._cleanup_auto_refresh)
-  end
+	  -- Call explorer's cleanup function to stop file watchers
+	  if diff.explorer and diff.explorer._cleanup_auto_refresh then
+	    pcall(diff.explorer._cleanup_auto_refresh)
+	  end
 
-  -- Send didClose notifications for virtual buffers
+  -- Stop any pending combined-view precompute timers/callbacks before buffers
+  -- or temporary repositories disappear.
+  pcall(require("codediff.ui.combined.cache").invalidate, tabpage, "cleanup")
+
+	  -- Send didClose notifications for virtual buffers
   -- Compute URIs on-demand since we don't store them anymore
   local original_virtual_uri = session.compute_virtual_uri(diff.git_root, diff.original_revision, diff.original_path)
   local modified_virtual_uri = session.compute_virtual_uri(diff.git_root, diff.modified_revision, diff.modified_path)
@@ -156,7 +160,7 @@ function M.setup_autocmds()
         for tabpage, diff in pairs(active_diffs) do
           if diff.original_win == closed_win or diff.modified_win == closed_win then
             -- single_pane/inline mode: we expect only 1 diff window
-            local is_single_window = diff.single_pane == true or diff.layout == "inline"
+            local is_single_window = diff.single_pane == true or diff.layout == "inline" or diff.layout == "combined"
             local diff_win_count = count_diff_windows()
             local threshold = is_single_window and 0 or 1
             if diff_win_count <= threshold then
@@ -199,7 +203,7 @@ function M.setup_autocmds()
 
       if diff then
         local diff_win_count = count_diff_windows()
-        local is_single_window = diff.single_pane == true or diff.layout == "inline"
+        local is_single_window = diff.single_pane == true or diff.layout == "inline" or diff.layout == "combined"
         local threshold = is_single_window and 0 or 1
         if diff_win_count <= threshold then
           cleanup_diff(current_tab)

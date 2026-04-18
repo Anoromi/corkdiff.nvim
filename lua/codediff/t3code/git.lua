@@ -79,7 +79,7 @@ function M.read_file_lines(repo_root, ref, path)
   end
   local stdout, err = run_git(repo_root, { "show", string.format("%s:%s", ref, path) })
   if not stdout then
-    return {}, err
+    return nil, err
   end
   return util.to_lines(stdout), nil
 end
@@ -87,6 +87,9 @@ end
 function M.read_current_lines(abs_path)
   local bufnr = vim.fn.bufnr(abs_path)
   if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) then
+    if not vim.api.nvim_buf_is_loaded(bufnr) then
+      vim.fn.bufload(bufnr)
+    end
     return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), bufnr
   end
   if vim.fn.filereadable(abs_path) == 1 then

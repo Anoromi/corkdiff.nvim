@@ -108,6 +108,14 @@ local function do_diff_update(bufnr, skip_watcher_check)
       return
     end
 
+    if session and session.layout == "combined" then
+      local combined_cache = require("codediff.ui.combined.cache")
+      combined_cache.invalidate(tabpage, "auto-refresh")
+      combined_cache.precompute(tabpage)
+      require("codediff.ui.view.combined").rerender(tabpage, { preserve_cursor = true })
+      return
+    end
+
     -- Side-by-side mode: Update decorations on both buffers
     core.render_diff(original_bufnr, modified_bufnr, original_lines, modified_lines, lines_diff)
 

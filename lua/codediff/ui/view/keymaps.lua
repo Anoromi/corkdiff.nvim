@@ -20,6 +20,7 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
   local is_history_mode = session and session.mode == "history"
   local is_t3code_mode = session and session.mode == "t3code"
   local is_inline = session and session.layout == "inline"
+  local is_combined = session and session.layout == "combined"
 
   -- Helper: Quit diff view
   local function quit_diff()
@@ -81,6 +82,19 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     if not session or not session.stored_diff_result then
       return nil, nil
     end
+    if session.layout == "combined" and session.combined then
+      local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+      local hunks = session.combined.hunks or {}
+      for i, hunk in ipairs(hunks) do
+        local next_hunk = hunks[i + 1]
+        local next_line = next_hunk and next_hunk.line or math.huge
+        if cursor_line >= hunk.line and cursor_line < next_line then
+          return hunk.change, i, session.combined.files[hunk.file_index]
+        end
+      end
+      return nil, nil, nil
+    end
+
     local diff_result = session.stored_diff_result
     if not diff_result.changes or #diff_result.changes == 0 then
       return nil, nil
@@ -243,6 +257,11 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
+    if is_combined then
+      vim.notify("Combined view is edited directly; use :write to apply changes.", vim.log.levels.INFO)
+      return
+    end
+
     -- Side-by-side mode: copy from other buffer to current
     local current_buf = vim.api.nvim_get_current_buf()
     local is_original = current_buf == original_bufnr
@@ -290,6 +309,11 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
+    if is_combined then
+      vim.notify("Combined view is edited directly; use :write to apply changes.", vim.log.levels.INFO)
+      return
+    end
+
     -- Side-by-side mode: copy from current buffer to other
     local current_buf = vim.api.nvim_get_current_buf()
     local is_original = current_buf == original_bufnr
@@ -333,6 +357,11 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     local session = lifecycle.get_session(tabpage)
 
     if not session then
+      return
+    end
+
+    if is_combined and session.modified_bufnr and vim.api.nvim_buf_is_valid(session.modified_bufnr) and vim.bo[session.modified_bufnr].modified then
+      vim.notify("Write combined edits before staging or unstaging", vim.log.levels.WARN)
       return
     end
 
@@ -389,6 +418,41 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
 
     local current_buf = vim.api.nvim_get_current_buf()
     local side = nil
+    if is_combined then
+      local file, map = require("codediff.ui.combined.navigation").current_file(tabpage)
+      if not file then
+        return
+      end
+      local target_file = file.source_path or (file.git_root and file.path and (file.git_root .. "/" .. file.path))
+      if not target_file or target_file == "" then
+        vim.notify("No source file for this combined section", vim.log.levels.WARN)
+        return
+      end
+      local cursor = { map and map.modified_line or 1, 0 }
+      local current_tab = vim.api.nvim_get_current_tabpage()
+      local tabs = vim.api.nvim_list_tabpages()
+      local current_index = nil
+      for i, tab in ipairs(tabs) do
+        if tab == current_tab then
+          current_index = i
+          break
+        end
+      end
+      local target_tab
+      if current_index and current_index > 1 then
+        target_tab = tabs[current_index - 1]
+      else
+        vim.cmd("tabnew")
+        target_tab = vim.api.nvim_get_current_tabpage()
+        vim.cmd("tabmove 0")
+      end
+      if vim.api.nvim_get_current_tabpage() ~= target_tab then
+        vim.api.nvim_set_current_tabpage(target_tab)
+      end
+      vim.cmd("edit " .. vim.fn.fnameescape(target_file))
+      pcall(vim.api.nvim_win_set_cursor, 0, cursor)
+      return
+    end
     if current_buf == original_bufnr then
       side = "original"
     elseif current_buf == modified_bufnr then
@@ -525,34 +589,43 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
+    local hunk, hunk_idx, combined_file = find_hunk_at_cursor()
+    local modified_revision = combined_file and combined_file.modified_revision or session.modified_revision
     -- Only allow staging from unstaged views (working tree changes)
-    if session.modified_revision ~= nil then
+    if modified_revision ~= nil then
       vim.notify("Stage only works on unstaged changes", vim.log.levels.WARN)
       return
     end
-
-    local hunk, hunk_idx = find_hunk_at_cursor()
     if not hunk then
       vim.notify("No hunk at cursor position", vim.log.levels.WARN)
       return
     end
 
     -- Get the file path relative to git root
-    local file_path = session.original_path or session.modified_path
+    local file_path = combined_file and (combined_file.path or combined_file.old_path) or (session.original_path or session.modified_path)
     if not file_path or file_path == "" then
       vim.notify("No file path for staging", vim.log.levels.WARN)
       return
     end
 
-    local stage_orig_buf, stage_mod_buf = lifecycle.get_buffers(tabpage)
-    if not stage_orig_buf or not stage_mod_buf or not vim.api.nvim_buf_is_valid(stage_orig_buf) or not vim.api.nvim_buf_is_valid(stage_mod_buf) then
-      vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
+    if is_combined and vim.bo[modified_bufnr].modified then
+      vim.notify("Write combined edits before staging hunks", vim.log.levels.WARN)
       return
     end
 
-    -- Read lines from both buffers for this hunk
-    local orig_lines = vim.api.nvim_buf_get_lines(stage_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
-    local mod_lines = vim.api.nvim_buf_get_lines(stage_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
+    local orig_lines, mod_lines
+    if combined_file then
+      orig_lines = vim.list_slice(combined_file.original_lines or {}, hunk.original.start_line, hunk.original.end_line - 1)
+      mod_lines = vim.list_slice(combined_file.modified_lines or {}, hunk.modified.start_line, hunk.modified.end_line - 1)
+    else
+      local stage_orig_buf, stage_mod_buf = lifecycle.get_buffers(tabpage)
+      if not stage_orig_buf or not stage_mod_buf or not vim.api.nvim_buf_is_valid(stage_orig_buf) or not vim.api.nvim_buf_is_valid(stage_mod_buf) then
+        vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
+        return
+      end
+      orig_lines = vim.api.nvim_buf_get_lines(stage_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
+      mod_lines = vim.api.nvim_buf_get_lines(stage_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
+    end
 
     local patch = build_hunk_patch(file_path, orig_lines, mod_lines, hunk.original.start_line, hunk.modified.start_line)
 
@@ -575,32 +648,42 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     end
 
     -- Only allow unstaging from staged views
-    if session.modified_revision ~= ":0" then
+    local hunk, hunk_idx, combined_file = find_hunk_at_cursor()
+    local modified_revision = combined_file and combined_file.modified_revision or session.modified_revision
+    if modified_revision ~= ":0" then
       vim.notify("Unstage only works on staged changes", vim.log.levels.WARN)
       return
     end
 
-    local hunk, hunk_idx = find_hunk_at_cursor()
     if not hunk then
       vim.notify("No hunk at cursor position", vim.log.levels.WARN)
       return
     end
 
-    local file_path = session.original_path or session.modified_path
+    if is_combined and vim.bo[modified_bufnr].modified then
+      vim.notify("Write combined edits before unstaging hunks", vim.log.levels.WARN)
+      return
+    end
+
+    local file_path = combined_file and (combined_file.path or combined_file.old_path) or (session.original_path or session.modified_path)
     if not file_path or file_path == "" then
       vim.notify("No file path for unstaging", vim.log.levels.WARN)
       return
     end
 
-    local unstage_orig_buf, unstage_mod_buf = lifecycle.get_buffers(tabpage)
-    if not unstage_orig_buf or not unstage_mod_buf or not vim.api.nvim_buf_is_valid(unstage_orig_buf) or not vim.api.nvim_buf_is_valid(unstage_mod_buf) then
-      vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
-      return
+    local orig_lines, mod_lines
+    if combined_file then
+      orig_lines = vim.list_slice(combined_file.original_lines or {}, hunk.original.start_line, hunk.original.end_line - 1)
+      mod_lines = vim.list_slice(combined_file.modified_lines or {}, hunk.modified.start_line, hunk.modified.end_line - 1)
+    else
+      local unstage_orig_buf, unstage_mod_buf = lifecycle.get_buffers(tabpage)
+      if not unstage_orig_buf or not unstage_mod_buf or not vim.api.nvim_buf_is_valid(unstage_orig_buf) or not vim.api.nvim_buf_is_valid(unstage_mod_buf) then
+        vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
+        return
+      end
+      orig_lines = vim.api.nvim_buf_get_lines(unstage_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
+      mod_lines = vim.api.nvim_buf_get_lines(unstage_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
     end
-
-    -- Read lines from both buffers for this hunk
-    local orig_lines = vim.api.nvim_buf_get_lines(unstage_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
-    local mod_lines = vim.api.nvim_buf_get_lines(unstage_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
 
     local patch = build_hunk_patch(file_path, orig_lines, mod_lines, hunk.original.start_line, hunk.modified.start_line)
 
@@ -623,18 +706,24 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     end
 
     -- Only allow discarding in unstaged views (working tree changes)
-    if session.modified_revision ~= nil then
+    local hunk, hunk_idx, combined_file = find_hunk_at_cursor()
+    local modified_revision = combined_file and combined_file.modified_revision or session.modified_revision
+    if modified_revision ~= nil then
       vim.notify("Discard only works on unstaged changes (working tree)", vim.log.levels.WARN)
       return
     end
 
-    local hunk, hunk_idx = find_hunk_at_cursor()
     if not hunk then
       vim.notify("No hunk at cursor position", vim.log.levels.WARN)
       return
     end
 
-    local file_path = session.original_path or session.modified_path
+    if is_combined and vim.bo[modified_bufnr].modified then
+      vim.notify("Write combined edits before discarding hunks", vim.log.levels.WARN)
+      return
+    end
+
+    local file_path = combined_file and (combined_file.path or combined_file.old_path) or (session.original_path or session.modified_path)
     if not file_path or file_path == "" then
       vim.notify("No file path for discarding", vim.log.levels.WARN)
       return
@@ -647,15 +736,19 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
       return
     end
 
-    local discard_orig_buf, discard_mod_buf = lifecycle.get_buffers(tabpage)
-    if not discard_orig_buf or not discard_mod_buf or not vim.api.nvim_buf_is_valid(discard_orig_buf) or not vim.api.nvim_buf_is_valid(discard_mod_buf) then
-      vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
-      return
+    local orig_lines, mod_lines
+    if combined_file then
+      orig_lines = vim.list_slice(combined_file.original_lines or {}, hunk.original.start_line, hunk.original.end_line - 1)
+      mod_lines = vim.list_slice(combined_file.modified_lines or {}, hunk.modified.start_line, hunk.modified.end_line - 1)
+    else
+      local discard_orig_buf, discard_mod_buf = lifecycle.get_buffers(tabpage)
+      if not discard_orig_buf or not discard_mod_buf or not vim.api.nvim_buf_is_valid(discard_orig_buf) or not vim.api.nvim_buf_is_valid(discard_mod_buf) then
+        vim.notify("Diff buffers are no longer available", vim.log.levels.WARN)
+        return
+      end
+      orig_lines = vim.api.nvim_buf_get_lines(discard_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
+      mod_lines = vim.api.nvim_buf_get_lines(discard_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
     end
-
-    -- Read lines from both buffers for this hunk
-    local orig_lines = vim.api.nvim_buf_get_lines(discard_orig_buf, hunk.original.start_line - 1, hunk.original.end_line - 1, false)
-    local mod_lines = vim.api.nvim_buf_get_lines(discard_mod_buf, hunk.modified.start_line - 1, hunk.modified.end_line - 1, false)
 
     local patch = build_hunk_patch(file_path, orig_lines, mod_lines, hunk.original.start_line, hunk.modified.start_line)
 
@@ -700,11 +793,11 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
 
   -- Diff get/put (do, dp) - layout-aware semantics
   if keymaps.diff_get then
-    local desc = is_inline and "Revert hunk to original" or "Get change from other buffer"
+    local desc = is_combined and "Combined view edits are saved with :write" or (is_inline and "Revert hunk to original" or "Get change from other buffer")
     lifecycle.set_tab_keymap(tabpage, "n", keymaps.diff_get, diff_get, { desc = desc })
   end
   if keymaps.diff_put then
-    local desc = is_inline and "Accept change (no-op in inline)" or "Put change to other buffer"
+    local desc = is_combined and "Combined view edits are saved with :write" or (is_inline and "Accept change (no-op in inline)" or "Put change to other buffer")
     lifecycle.set_tab_keymap(tabpage, "n", keymaps.diff_put, diff_put, { desc = desc })
   end
   if keymaps.open_in_prev_tab then
@@ -714,6 +807,16 @@ function M.setup_all_keymaps(tabpage, original_bufnr, modified_bufnr, is_explore
     lifecycle.set_tab_keymap(tabpage, "n", keymaps.toggle_layout, function()
       require("codediff.ui.view").toggle_layout(tabpage)
     end, { desc = "Toggle diff layout" })
+  end
+  if keymaps.toggle_combined then
+    lifecycle.set_tab_keymap(tabpage, "n", keymaps.toggle_combined, function()
+      require("codediff.ui.view").toggle_combined(tabpage)
+    end, { desc = "Toggle combined view" })
+  end
+  if keymaps.toggle_combined_view then
+    lifecycle.set_tab_keymap(tabpage, "n", keymaps.toggle_combined_view, function()
+      require("codediff.ui.view").toggle_combined_view(tabpage)
+    end, { desc = "Toggle combined changes/full" })
   end
 
   -- Toggle stage/unstage (- key) - only in explorer mode

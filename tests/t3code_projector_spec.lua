@@ -185,4 +185,45 @@ describe("t3code projector", function()
     assert.equal("bar.txt", view.original_path)
     assert.equal("bar.txt", view.modified_path)
   end)
+
+  it("does not cache failed combined projections", function()
+    local fail_modified = true
+    package.loaded["codediff.t3code.git"] = {
+      checkpoint_ref_for_turn = function()
+        return "refs/t3/0"
+      end,
+      read_file_lines = function(_, ref, path)
+        if ref == "refs/t3-visible/1" and fail_modified then
+          return nil, "missing ref"
+        end
+        return { ref .. ":" .. path }, nil
+      end,
+    }
+
+    local projector = require("codediff.t3code.projector")
+    local thread = {
+      id = "thread-1",
+      repo_root = "/repo",
+      checkpoints = {
+        {
+          turnId = "turn-1",
+          turnCount = 1,
+          checkpointRef = "refs/t3/1",
+          visibleCheckpointRef = "refs/t3-visible/1",
+        },
+      },
+    }
+    local entry = { key = "foo", path = "foo.txt", status = "M" }
+    local projection_cache = {}
+
+    local failed = assert(projector.build_combined_file(thread, entry, "all", "history", nil, {}, projection_cache))
+    assert.is_truthy(failed.load_error)
+    assert.is_nil(next(projection_cache))
+
+    fail_modified = false
+    local succeeded = assert(projector.build_combined_file(thread, entry, "all", "history", nil, {}, projection_cache))
+    assert.is_nil(succeeded.load_error)
+    assert.same({ "refs/t3-visible/1:foo.txt" }, succeeded.modified_lines)
+    assert.is_truthy(next(projection_cache))
+  end)
 end)
