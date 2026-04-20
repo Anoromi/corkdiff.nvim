@@ -7,11 +7,27 @@ local function current_state(tabpage)
   return session, session and session.combined
 end
 
-local function goto_line(line)
+local function combined_winid(tabpage)
+  local session = lifecycle.get_session(tabpage or vim.api.nvim_get_current_tabpage())
+  if session and session.modified_win and vim.api.nvim_win_is_valid(session.modified_win) then
+    return session.modified_win
+  end
+  return vim.api.nvim_get_current_win()
+end
+
+local function goto_line(tabpage, line)
   if line and line > 0 then
-    pcall(vim.api.nvim_win_set_cursor, 0, { line, 0 })
-    vim.cmd("normal! zz")
-    return true
+    local winid = combined_winid(tabpage)
+    local ok = pcall(function()
+      if vim.api.nvim_get_current_win() ~= winid then
+        vim.api.nvim_set_current_win(winid)
+      end
+      vim.api.nvim_win_set_cursor(winid, { line, 0 })
+      vim.api.nvim_win_call(winid, function()
+        vim.cmd("normal! zz")
+      end)
+    end)
+    return ok
   end
   return false
 end
@@ -21,7 +37,7 @@ function M.line_map_at_cursor(tabpage)
   if not state then
     return nil
   end
-  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local row = vim.api.nvim_win_get_cursor(combined_winid(tabpage))[1]
   return state.line_map and state.line_map[row] or nil
 end
 
@@ -39,16 +55,16 @@ function M.next_hunk(tabpage)
   if not state or not state.hunks or #state.hunks == 0 then
     return false
   end
-  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_win_get_cursor(combined_winid(tabpage))[1]
   for index, hunk in ipairs(state.hunks) do
     if hunk.line > line then
       vim.api.nvim_echo({ { string.format("Hunk %d of %d", index, #state.hunks), "None" } }, false, {})
-      return goto_line(hunk.line)
+      return goto_line(tabpage, hunk.line)
     end
   end
   if require("codediff.config").options.diff.cycle_next_hunk then
     vim.api.nvim_echo({ { string.format("Hunk 1 of %d", #state.hunks), "None" } }, false, {})
-    return goto_line(state.hunks[1].line)
+    return goto_line(tabpage, state.hunks[1].line)
   end
   vim.api.nvim_echo({ { string.format("Last hunk (%d of %d)", #state.hunks, #state.hunks), "WarningMsg" } }, false, {})
   return false
@@ -59,17 +75,17 @@ function M.prev_hunk(tabpage)
   if not state or not state.hunks or #state.hunks == 0 then
     return false
   end
-  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_win_get_cursor(combined_winid(tabpage))[1]
   for index = #state.hunks, 1, -1 do
     local hunk = state.hunks[index]
     if hunk.line < line then
       vim.api.nvim_echo({ { string.format("Hunk %d of %d", index, #state.hunks), "None" } }, false, {})
-      return goto_line(hunk.line)
+      return goto_line(tabpage, hunk.line)
     end
   end
   if require("codediff.config").options.diff.cycle_next_hunk then
     vim.api.nvim_echo({ { string.format("Hunk %d of %d", #state.hunks, #state.hunks), "None" } }, false, {})
-    return goto_line(state.hunks[#state.hunks].line)
+    return goto_line(tabpage, state.hunks[#state.hunks].line)
   end
   vim.api.nvim_echo({ { string.format("First hunk (1 of %d)", #state.hunks), "WarningMsg" } }, false, {})
   return false
@@ -117,10 +133,23 @@ function M.jump_to_file(tabpage, file_data)
     return false
   end
   local target_index = nil
-  for index, file in ipairs(state.files or {}) do
-    if file.path == file_data.path and (not file_data.group or file.group == file_data.group) then
-      target_index = index
-      break
+  if file_data.key then
+    for index, file in ipairs(state.files or {}) do
+      if file.key == file_data.key then
+        target_index = index
+        break
+      end
+    end
+  end
+  if not target_index then
+    for index, file in ipairs(state.files or {}) do
+      if file.path == file_data.path
+        and (not file_data.group or file.group == file_data.group)
+        and (not file_data.old_path or file.old_path == file_data.old_path)
+      then
+        target_index = index
+        break
+      end
     end
   end
   if not target_index then
@@ -129,7 +158,7 @@ function M.jump_to_file(tabpage, file_data)
   for _, section in ipairs(state.sections or {}) do
     if section.file_index == target_index then
       sync_panel_selection(tabpage, state.files[target_index])
-      return goto_line(section.header_line)
+      return goto_line(tabpage, section.header_line)
     end
   end
   return false
@@ -140,16 +169,16 @@ function M.next_file(tabpage)
   if not state or not state.sections or #state.sections == 0 then
     return false
   end
-  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_win_get_cursor(combined_winid(tabpage))[1]
   for _, section in ipairs(state.sections) do
     if section.header_line > line then
       sync_panel_selection(tabpage or vim.api.nvim_get_current_tabpage(), state.files[section.file_index])
-      return goto_line(section.header_line)
+      return goto_line(tabpage, section.header_line)
     end
   end
   local first = state.sections[1]
   sync_panel_selection(tabpage or vim.api.nvim_get_current_tabpage(), state.files[first.file_index])
-  return goto_line(first.header_line)
+  return goto_line(tabpage, first.header_line)
 end
 
 function M.prev_file(tabpage)
@@ -157,17 +186,17 @@ function M.prev_file(tabpage)
   if not state or not state.sections or #state.sections == 0 then
     return false
   end
-  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local line = vim.api.nvim_win_get_cursor(combined_winid(tabpage))[1]
   for index = #state.sections, 1, -1 do
     local section = state.sections[index]
     if section.header_line < line then
       sync_panel_selection(tabpage or vim.api.nvim_get_current_tabpage(), state.files[section.file_index])
-      return goto_line(section.header_line)
+      return goto_line(tabpage, section.header_line)
     end
   end
   local last = state.sections[#state.sections]
   sync_panel_selection(tabpage or vim.api.nvim_get_current_tabpage(), state.files[last.file_index])
-  return goto_line(last.header_line)
+  return goto_line(tabpage, last.header_line)
 end
 
 return M

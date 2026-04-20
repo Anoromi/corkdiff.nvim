@@ -137,6 +137,67 @@ local function render_loading(tabpage)
   vim.bo[bufnr].readonly = was_readonly
 end
 
+local function current_panel_file(tabpage)
+  local session = lifecycle.get_session(tabpage)
+  local panel_obj = lifecycle.get_explorer(tabpage)
+  if not session or not panel_obj then
+    return nil
+  end
+
+  if session.mode == "t3code" then
+    local state = session.t3code
+    local key = panel_obj.current_file_key or (state and state.current_file_key)
+    if key and state then
+      for _, file in ipairs(state.files or {}) do
+        if file.key == key then
+          return file
+        end
+      end
+    end
+    return state and state.current_file or nil
+  end
+
+  return panel_obj.current_selection
+end
+
+local function sync_combined_cursor_file(tabpage)
+  local session = lifecycle.get_session(tabpage)
+  local panel_obj = lifecycle.get_explorer(tabpage)
+  if not session or not panel_obj or session.layout ~= "combined" then
+    return nil
+  end
+
+  local file = require("codediff.ui.combined.navigation").current_file(tabpage)
+  if not file then
+    return nil
+  end
+
+  if session.mode == "t3code" then
+    panel_obj.current_file_key = file.key
+    if session.t3code then
+      session.t3code.current_file_key = file.key
+      for _, entry in ipairs(session.t3code.files or {}) do
+        if entry.key == file.key then
+          session.t3code.current_file = vim.deepcopy(entry)
+          break
+        end
+      end
+    end
+    return file
+  end
+
+  panel_obj.current_file_path = file.path
+  panel_obj.current_file_group = file.group
+  panel_obj.current_selection = {
+    path = file.path,
+    old_path = file.old_path,
+    status = file.status,
+    git_root = file.git_root,
+    group = file.group,
+  }
+  return file
+end
+
 local function apply_render(tabpage, files, opts)
   opts = opts or {}
   local session = lifecycle.get_session(tabpage)
@@ -200,7 +261,10 @@ function M.rerender(tabpage, opts)
 	        return
       end
       session.combined_dirty_notified = false
-      apply_render(tabpage, files or {}, opts)
+      local rendered = apply_render(tabpage, files or {}, opts)
+      if rendered and opts.focus_file then
+        require("codediff.ui.combined.navigation").jump_to_file(tabpage, opts.focus_file)
+      end
       layout.arrange(tabpage)
     end)
   end)
@@ -254,7 +318,10 @@ function M.create(session_config, _filetype, on_ready)
   setup_keymaps(tabpage, original_buf, combined_buf)
   install_autocmds(tabpage, combined_buf)
   cache.precompute(tabpage, { immediate = true, force = true })
-  M.rerender(tabpage, { view = combined_config().initial_view or "changes" })
+  M.rerender(tabpage, {
+    view = combined_config().initial_view or "changes",
+    focus_file = current_panel_file(tabpage),
+  })
   layout.arrange(tabpage)
   events.emit("CodeDiffOpen", { tabpage = tabpage, mode = session_config.mode, layout = "combined" })
   if on_ready then
@@ -305,7 +372,10 @@ function M.enter(tabpage)
   install_autocmds(tabpage, combined_buf)
   setup_keymaps(tabpage, original_buf, combined_buf)
   cache.precompute(tabpage, { immediate = true, force = true })
-  M.rerender(tabpage, { view = combined_config().initial_view or "changes" })
+  M.rerender(tabpage, {
+    view = combined_config().initial_view or "changes",
+    focus_file = current_panel_file(tabpage),
+  })
   layout.arrange(tabpage)
   return true
 end
@@ -321,6 +391,7 @@ function M.leave(tabpage)
     return false
   end
 
+  local focused_file = sync_combined_cursor_file(tabpage)
   local target = session.combined_previous_layout or (session.combined and session.combined.previous_layout) or "inline"
   if target ~= "side-by-side" then
     target = "inline"
@@ -334,6 +405,10 @@ function M.leave(tabpage)
 
   local panel_obj = lifecycle.get_explorer(tabpage)
   if session.mode == "t3code" then
+    if focused_file and session.t3code and not session.t3code.current_file then
+      session.t3code.current_file = vim.deepcopy(focused_file)
+      session.t3code.current_file_key = focused_file.key
+    end
     return require("codediff.t3code.session").rerender_current(panel_obj)
   end
   return require("codediff.ui.explorer").rerender_current(panel_obj)

@@ -85,6 +85,21 @@ local function wait_for_cache(tabpage)
   return combined_cache.get_ready_files(tabpage)
 end
 
+local function wait_for_file_view(tabpage, path, layout_name)
+  local ok = vim.wait(10000, function()
+    local session = lifecycle.get_session(tabpage)
+    local explorer = lifecycle.get_explorer(tabpage)
+    return session
+      and session.layout == layout_name
+      and session.layout ~= "combined"
+      and explorer
+      and explorer.current_selection
+      and explorer.current_selection.path == path
+  end, 100)
+  assert.is_true(ok, "file view should focus " .. path)
+  return lifecycle.get_session(tabpage)
+end
+
 describe("combined view", function()
   local repo
 
@@ -282,6 +297,48 @@ describe("combined view", function()
 	    end, 100), "combined toggle should restore inline")
 	  end)
 
+  it("leaves combined view using the file under the combined cursor", function()
+    require("codediff").setup({ diff = { layout = "inline" } })
+    local tabpage = open_explorer(repo, "inline")
+    wait_for_cache(tabpage)
+
+    assert.is_true(view.toggle_combined(tabpage))
+    local session = wait_for_combined(tabpage)
+
+    assert.is_true(require("codediff.ui.combined.navigation").jump_to_file(tabpage, {
+      path = "two.txt",
+      group = "unstaged",
+    }))
+
+    assert.is_true(view.toggle_combined(tabpage))
+    local current = wait_for_file_view(tabpage, "two.txt", "inline")
+    h.assert_contains(h.get_buffer_content(current.modified_bufnr), "TWO B")
+  end)
+
+  it("re-enters combined view at the current single-file selection", function()
+    require("codediff").setup({ diff = { layout = "inline" } })
+    local tabpage = open_explorer(repo, "inline")
+    wait_for_cache(tabpage)
+
+    assert.is_true(view.toggle_combined(tabpage))
+    wait_for_combined(tabpage)
+
+    assert.is_true(require("codediff.ui.combined.navigation").jump_to_file(tabpage, {
+      path = "two.txt",
+      group = "unstaged",
+    }))
+
+    assert.is_true(view.toggle_combined(tabpage))
+    wait_for_file_view(tabpage, "two.txt", "inline")
+
+    assert.is_true(view.toggle_combined(tabpage))
+    wait_for_combined(tabpage)
+
+    local file = require("codediff.ui.combined.navigation").current_file(tabpage)
+    assert.is_truthy(file)
+    assert.equal("two.txt", file.path)
+  end)
+
   it("uses precomputed explorer files when toggling into combined view", function()
     local model = require("codediff.ui.combined.model")
     local original_compute = model.compute_diff
@@ -373,5 +430,67 @@ describe("combined view", function()
 
     model.compute_diff = original_compute
     inline.compute_syntax_highlights = original_syntax
+  end)
+
+  it("jump_to_file prefers keyed matches over path fallbacks", function()
+    local render = require("codediff.ui.combined.render")
+    local navigation = require("codediff.ui.combined.navigation")
+    local tabpage = vim.api.nvim_get_current_tabpage()
+    local win = vim.api.nvim_get_current_win()
+    local original_buf = vim.api.nvim_create_buf(false, true)
+    local combined_buf = vim.api.nvim_create_buf(false, true)
+
+    vim.api.nvim_win_set_buf(win, combined_buf)
+    lifecycle.create_session(
+      tabpage,
+      "t3code",
+      repo.dir,
+      "",
+      "",
+      nil,
+      nil,
+      original_buf,
+      combined_buf,
+      win,
+      win,
+      { changes = {}, moves = {} },
+      nil
+    )
+    lifecycle.update_layout(tabpage, "combined")
+
+    local session = lifecycle.get_session(tabpage)
+    session.combined = render.render(combined_buf, {
+      {
+        key = "first",
+        path = "same.txt",
+        old_path = "same-old.txt",
+        status = "M",
+        group = "t3code",
+        original_lines = { "one" },
+        modified_lines = { "ONE" },
+        diff = { changes = {}, moves = {} },
+      },
+      {
+        key = "second",
+        path = "same.txt",
+        old_path = "same-old.txt",
+        status = "M",
+        group = "t3code",
+        original_lines = { "two" },
+        modified_lines = { "TWO" },
+        diff = { changes = {}, moves = {} },
+      },
+    }, { view = "full" })
+
+    assert.is_true(navigation.jump_to_file(tabpage, {
+      key = "second",
+      path = "same.txt",
+      group = "t3code",
+      old_path = "same-old.txt",
+    }))
+
+    local file = navigation.current_file(tabpage)
+    assert.is_truthy(file)
+    assert.equal("second", file.key)
   end)
 	end)
