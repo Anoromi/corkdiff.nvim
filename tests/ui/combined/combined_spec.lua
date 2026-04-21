@@ -432,7 +432,7 @@ describe("combined view", function()
     inline.compute_syntax_highlights = original_syntax
   end)
 
-  it("jump_to_file prefers keyed matches over path fallbacks", function()
+	  it("jump_to_file prefers keyed matches over path fallbacks", function()
     local render = require("codediff.ui.combined.render")
     local navigation = require("codediff.ui.combined.navigation")
     local tabpage = vim.api.nvim_get_current_tabpage()
@@ -490,7 +490,94 @@ describe("combined view", function()
     }))
 
     local file = navigation.current_file(tabpage)
-    assert.is_truthy(file)
-    assert.equal("second", file.key)
+	    assert.is_truthy(file)
+	    assert.equal("second", file.key)
+	  end)
+
+  it("does not precompute t3code combined files from inline layout unless forced", function()
+    local model = require("codediff.ui.combined.model")
+    local original_build_manifest = model.build_manifest
+    local original_prepare_context = model.prepare_projection_context
+    local build_count = 0
+
+    model.build_manifest = function(_, callback)
+      build_count = build_count + 1
+      callback(nil, { descriptors = {}, signature = "empty" })
+    end
+    model.prepare_projection_context = function(_, _, callback)
+      callback(nil, nil)
+    end
+
+    local tabpage = vim.api.nvim_get_current_tabpage()
+    local win = vim.api.nvim_get_current_win()
+    local original_buf = vim.api.nvim_create_buf(false, true)
+    local modified_buf = vim.api.nvim_create_buf(false, true)
+    lifecycle.create_session(
+      tabpage,
+      "t3code",
+      repo.dir,
+      "",
+      "",
+      nil,
+      nil,
+      original_buf,
+      modified_buf,
+      win,
+      win,
+      { changes = {}, moves = {} },
+      nil
+    )
+    lifecycle.update_layout(tabpage, "inline")
+
+    assert.is_false(combined_cache.precompute(tabpage, { immediate = true }))
+    assert.equal(0, build_count)
+
+    assert.is_true(combined_cache.precompute(tabpage, { immediate = true, force = true }))
+    assert.equal(1, build_count)
+
+    model.build_manifest = original_build_manifest
+    model.prepare_projection_context = original_prepare_context
   end)
-	end)
+
+  it("mirrors diagnostics with one diagnostic lookup per source buffer", function()
+    local render = require("codediff.ui.combined.render")
+    local combined_buf = vim.api.nvim_create_buf(false, true)
+    local source_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(combined_buf, 0, -1, false, { "one", "two" })
+    vim.api.nvim_buf_set_lines(source_buf, 0, -1, false, { "one", "two" })
+
+    local original_get = vim.diagnostic.get
+    local get_count = 0
+    vim.diagnostic.get = function(bufnr, opts)
+      get_count = get_count + 1
+      assert.equal(source_buf, bufnr)
+      assert.is_nil(opts)
+      return {
+        {
+          lnum = 0,
+          col = 0,
+          end_col = 3,
+          severity = vim.diagnostic.severity.ERROR,
+          message = "first",
+        },
+        {
+          lnum = 1,
+          col = 0,
+          end_col = 3,
+          severity = vim.diagnostic.severity.WARN,
+          message = "second",
+        },
+      }
+    end
+
+    render.mirror_diagnostics(combined_buf, {
+      line_map = {
+        [1] = { type = "content", source_bufnr = source_buf, modified_line = 1 },
+        [2] = { type = "content", source_bufnr = source_buf, modified_line = 2 },
+      },
+    })
+
+    assert.equal(1, get_count)
+    vim.diagnostic.get = original_get
+  end)
+		end)

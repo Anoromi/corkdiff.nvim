@@ -91,13 +91,10 @@ local function file_state_signature(git_root, path)
     return "none"
   end
 
-  local bufnr = vim.fn.bufnr(full_path)
-  if bufnr == -1 then
-    bufnr = vim.fn.bufadd(full_path)
-  end
-  if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    return stable_join({
+	local bufnr = vim.fn.bufnr(full_path)
+	if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+		return stable_join({
       "buf",
       full_path,
       vim.api.nvim_buf_get_changedtick(bufnr),
@@ -460,7 +457,42 @@ function M.build_manifest(session, callback)
   end
 end
 
-function M.build_file_projection(session, descriptor, callback)
+function M.prepare_projection_context(session, manifest, callback)
+  if not session then
+    callback("no codediff session", nil)
+    return
+  end
+  if session.mode ~= "t3code" then
+    callback(nil, nil)
+    return
+  end
+
+  local state = session.t3code
+  if not state then
+    callback("combined view requires a t3code session", nil)
+    return
+  end
+
+  local entries = {}
+  for _, descriptor in ipairs((manifest and manifest.descriptors) or {}) do
+    if descriptor.entry then
+      entries[#entries + 1] = descriptor.entry
+    end
+  end
+
+  local projector = require("codediff.t3code.projector")
+  local context, err = projector.prepare_combined_context(
+    state.thread,
+    entries,
+    state.selected_turn,
+    state.turn_view_mode,
+    state.transport,
+    state.diff_cache
+  )
+  callback(err, context)
+end
+
+function M.build_file_projection(session, descriptor, context, callback)
   if descriptor and descriptor.projection then
     local git = require("codediff.core.git")
     load_projection(git, vim.deepcopy(descriptor.projection), callback)
@@ -476,12 +508,13 @@ function M.build_file_projection(session, descriptor, callback)
   local projector = require("codediff.t3code.projector")
   local file, err = projector.build_combined_file(
     state.thread,
-    descriptor.entry,
-    state.selected_turn,
-    state.turn_view_mode,
+	    descriptor.entry,
+	    state.selected_turn,
+	    state.turn_view_mode,
     state.transport,
     state.diff_cache,
-    state.combined_projection_cache
+    state.combined_projection_cache,
+    context
   )
   if not file then
     callback(err, nil)
@@ -492,6 +525,12 @@ function M.build_file_projection(session, descriptor, callback)
   file.group = "t3code"
   file.git_root = state.thread.repo_root
   file.filetype = file.filetype or filetype_for(file.path)
+  if file.modified_bufnr and vim.api.nvim_buf_is_valid(file.modified_bufnr) then
+    file.source_bufnr = file.modified_bufnr
+    file.source_path = vim.api.nvim_buf_get_name(file.modified_bufnr)
+  elseif file.editable and not file.source_path and file.git_root and file.path then
+    file.source_path = file.git_root .. "/" .. file.path
+  end
   callback(nil, finalize_projection(file))
 end
 

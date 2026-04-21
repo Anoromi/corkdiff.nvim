@@ -10,16 +10,18 @@ local cache = require("codediff.ui.combined.cache")
 local render = require("codediff.ui.combined.render")
 local edit = require("codediff.ui.combined.edit")
 
+local set_t3code_current_file
+
 local function combined_config()
-	return ((config.options.diff or {}).combined or {})
+  return ((config.options.diff or {}).combined or {})
 end
 
 local function default_previous_layout()
-	local configured = (config.options.diff or {}).layout
-	if configured == "side-by-side" or configured == "inline" then
-		return configured
-	end
-	return "inline"
+  local configured = (config.options.diff or {}).layout
+  if configured == "side-by-side" or configured == "inline" then
+    return configured
+  end
+  return "inline"
 end
 
 local function setup_keymaps(tabpage, original_bufnr, combined_bufnr)
@@ -39,20 +41,20 @@ end
 
 local function install_autocmds(tabpage, bufnr)
   local group = vim.api.nvim_create_augroup("CodeDiffCombined_" .. tabpage, { clear = true })
-	  vim.api.nvim_create_autocmd("BufWriteCmd", {
-	    group = group,
-	    buffer = bufnr,
-	    callback = function()
-	      local session = lifecycle.get_session(tabpage)
-	      if not session or not session.combined then
-	        return
-	      end
-	      edit.save(bufnr, session.combined, function()
-          cache.invalidate(tabpage, "combined-save")
-	        M.rerender(tabpage, { preserve_cursor = true })
-	      end)
-	    end,
-	  })
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    group = group,
+    buffer = bufnr,
+    callback = function()
+      local session = lifecycle.get_session(tabpage)
+      if not session or not session.combined then
+        return
+      end
+      edit.save(bufnr, session.combined, function()
+        cache.invalidate(tabpage, "combined-save")
+        M.rerender(tabpage, { preserve_cursor = true })
+      end)
+    end,
+  })
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
     group = group,
     buffer = bufnr,
@@ -65,7 +67,10 @@ local function install_autocmds(tabpage, bufnr)
         return
       end
       if session.mode == "t3code" then
-        panel_obj.current_file_key = file.key
+        if panel_obj.current_file_key == file.key then
+          return
+        end
+        set_t3code_current_file(tabpage, file)
         pcall(require("codediff.t3code.panel").render, panel_obj)
       elseif panel_obj.current_file_path ~= file.path or panel_obj.current_file_group ~= file.group then
         panel_obj.current_file_path = file.path
@@ -88,7 +93,16 @@ local function install_autocmds(tabpage, bufnr)
     callback = function()
       local session = lifecycle.get_session(tabpage)
       if session and session.combined then
-        render.mirror_diagnostics(bufnr, session.combined)
+        if session.combined_diagnostic_timer then
+          vim.fn.timer_stop(session.combined_diagnostic_timer)
+        end
+        session.combined_diagnostic_timer = vim.fn.timer_start(100, function()
+          session.combined_diagnostic_timer = nil
+          local current = lifecycle.get_session(tabpage)
+          if current and current.combined then
+            render.mirror_diagnostics(bufnr, current.combined)
+          end
+        end)
       end
     end,
   })
@@ -160,6 +174,25 @@ local function current_panel_file(tabpage)
   return panel_obj.current_selection
 end
 
+set_t3code_current_file = function(tabpage, file)
+  local session = lifecycle.get_session(tabpage)
+  local panel_obj = lifecycle.get_explorer(tabpage)
+  if not session or not session.t3code or not panel_obj or not file then
+    return false
+  end
+
+  panel_obj.current_file_key = file.key
+  session.t3code.current_file_key = file.key
+  for _, entry in ipairs(session.t3code.files or {}) do
+    if entry.key == file.key then
+      session.t3code.current_file = vim.deepcopy(entry)
+      return true
+    end
+  end
+  session.t3code.current_file = vim.deepcopy(file)
+  return true
+end
+
 local function sync_combined_cursor_file(tabpage)
   local session = lifecycle.get_session(tabpage)
   local panel_obj = lifecycle.get_explorer(tabpage)
@@ -173,16 +206,7 @@ local function sync_combined_cursor_file(tabpage)
   end
 
   if session.mode == "t3code" then
-    panel_obj.current_file_key = file.key
-    if session.t3code then
-      session.t3code.current_file_key = file.key
-      for _, entry in ipairs(session.t3code.files or {}) do
-        if entry.key == file.key then
-          session.t3code.current_file = vim.deepcopy(entry)
-          break
-        end
-      end
-    end
+    set_t3code_current_file(tabpage, file)
     return file
   end
 
@@ -215,10 +239,12 @@ local function apply_render(tabpage, files, opts)
   end
 
   local view = opts.view or (session.combined and session.combined.view) or combined_config().initial_view or "changes"
+  local render_signature = table.concat({ cache.get_signature(tabpage) or "", view }, "::")
   local state = render.render(combined_bufnr, files, {
     view = view,
     previous_layout = session.combined_previous_layout or (session.combined and session.combined.previous_layout),
   })
+  state.render_signature = render_signature
   session.combined = state
   session.stored_diff_result = {
     changes = vim.tbl_map(function(hunk)
@@ -248,19 +274,33 @@ function M.rerender(tabpage, opts)
     if not session.combined_dirty_notified then
       vim.notify("Combined view has unsaved edits; write it before refreshing", vim.log.levels.WARN)
       session.combined_dirty_notified = true
-	    end
-	    return false
-	  end
+    end
+    return false
+  end
   if not cache.get_ready_files(tabpage) then
     render_loading(tabpage)
   end
-	  cache.get_or_build(tabpage, function(err, files)
-	    vim.schedule(function()
-	      if err then
-	        vim.notify("Failed to build combined view: " .. tostring(err), vim.log.levels.ERROR)
-	        return
+  cache.get_or_build(tabpage, function(err, files)
+    vim.schedule(function()
+      if err then
+        vim.notify("Failed to build combined view: " .. tostring(err), vim.log.levels.ERROR)
+        return
       end
       session.combined_dirty_notified = false
+      local view = opts.view or (session.combined and session.combined.view) or combined_config().initial_view or "changes"
+      local render_signature = table.concat({ cache.get_signature(tabpage) or "", view }, "::")
+      if
+        not opts.force_render
+        and not opts.focus_file
+        and session.combined
+        and session.combined.render_signature == render_signature
+        and session.modified_bufnr
+        and vim.api.nvim_buf_is_valid(session.modified_bufnr)
+        and not vim.bo[session.modified_bufnr].modified
+      then
+        layout.arrange(tabpage)
+        return
+      end
       local rendered = apply_render(tabpage, files or {}, opts)
       if rendered and opts.focus_file then
         require("codediff.ui.combined.navigation").jump_to_file(tabpage, opts.focus_file)

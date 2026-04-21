@@ -6,11 +6,11 @@ function M.system(cmd, opts)
     return nil, "vim.system is required for t3code integration"
   end
 
-  local result = vim.system(cmd, {
-    cwd = opts.cwd,
-    text = true,
-    stdin = opts.stdin,
-  }):wait()
+	local result = vim.system(cmd, {
+	  cwd = opts.cwd,
+	  text = opts.text ~= false,
+	  stdin = opts.stdin,
+	}):wait()
 
   if result.code ~= 0 then
     local stderr = result.stderr and vim.trim(result.stderr) or ""

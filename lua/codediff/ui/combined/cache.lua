@@ -125,53 +125,66 @@ local function start_build(tabpage)
     local index = 1
     local first_err = nil
 
-    local function step()
-      if cache.generation ~= generation then
-        return
-      end
-
-      local processed = 0
-      while processed < files_per_tick() and index <= #descriptors do
-        local descriptor = descriptors[index]
-        index = index + 1
-        processed = processed + 1
-
-        local entry = cache.file_entries[descriptor.key]
-        if entry and entry.signature == descriptor.signature and entry.file and cached_file_current(entry.file) then
-          files[#files + 1] = entry.file
-        else
-          local file_started = vim.uv.hrtime()
-          model.build_file_projection(session, descriptor, function(file_err, file)
-            profile("file " .. tostring(descriptor.key), file_started)
-            if cache.generation ~= generation then
-              return
-            end
-            if file_err and not first_err then
-              first_err = file_err
-            end
-            if file then
-              cache.file_entries[descriptor.key] = {
-                signature = descriptor.signature,
-                file = file,
-                built_at_generation = generation,
-              }
-              files[#files + 1] = file
-            end
-            vim.schedule(step)
-          end)
+    local function build_with_context(context)
+      local function step()
+        if cache.generation ~= generation then
           return
+        end
+
+        local processed = 0
+        while processed < files_per_tick() and index <= #descriptors do
+          local descriptor = descriptors[index]
+          index = index + 1
+          processed = processed + 1
+
+          local entry = cache.file_entries[descriptor.key]
+          if entry and entry.signature == descriptor.signature and entry.file and cached_file_current(entry.file) then
+            files[#files + 1] = entry.file
+          else
+            local file_started = vim.uv.hrtime()
+            model.build_file_projection(session, descriptor, context, function(file_err, file)
+              profile("file " .. tostring(descriptor.key), file_started)
+              if cache.generation ~= generation then
+                return
+              end
+              if file_err and not first_err then
+                first_err = file_err
+              end
+              if file then
+                cache.file_entries[descriptor.key] = {
+                  signature = descriptor.signature,
+                  file = file,
+                  built_at_generation = generation,
+                }
+                files[#files + 1] = file
+              end
+              vim.schedule(step)
+            end)
+            return
+          end
+        end
+
+        if index > #descriptors then
+          profile("build", build_started)
+          finish(cache, generation, first_err, files)
+        else
+          vim.schedule(step)
         end
       end
 
-      if index > #descriptors then
-        profile("build", build_started)
-        finish(cache, generation, first_err, files)
-      else
-        vim.schedule(step)
-      end
+      step()
     end
 
-    step()
+    model.prepare_projection_context(session, manifest, function(context_err, context)
+      if cache.generation ~= generation then
+        return
+      end
+      if context_err then
+        finish(cache, generation, context_err, nil)
+        return
+      end
+      build_with_context(context)
+    end)
   end)
 
   return true
@@ -208,6 +221,9 @@ function M.precompute(tabpage, opts)
   if not session or (session.mode ~= "explorer" and session.mode ~= "t3code") then
     return false
   end
+  if session.mode == "t3code" and session.layout ~= "combined" and not opts.force then
+    return false
+  end
 
   local cache = ensure_cache(session)
   if cache.ready or cache.building then
@@ -237,6 +253,12 @@ function M.get_ready_files(tabpage)
     return cache.files
   end
   return nil
+end
+
+function M.get_signature(tabpage)
+  local session = lifecycle.get_session(tabpage)
+  local cache = session and session.combined_cache
+  return cache and cache.signature or nil
 end
 
 function M.is_building(tabpage)
