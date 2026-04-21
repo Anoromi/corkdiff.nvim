@@ -215,6 +215,10 @@ local function current_file_signature(repo_root, rel_path)
   return "missing"
 end
 
+local function entry_key(entry)
+  return entry.key or table.concat({ "t3code", entry.old_path or "", entry.path or "" }, "\0")
+end
+
 local function get_checkpoint(thread, turn_count)
   for _, checkpoint in ipairs(thread.checkpoints or {}) do
     if checkpoint.turnCount == turn_count then
@@ -323,6 +327,20 @@ local function read_projection_file(repo_root, ref, path, opts)
   return lines or {}, nil
 end
 
+local function blob_lines(context, oid)
+  if not oid then
+    return {}
+  end
+  return util.deepcopy((context.blobs or {})[oid] or {})
+end
+
+local function add_oid(set, list, oid)
+  if oid and not set[oid] then
+    set[oid] = true
+    list[#list + 1] = oid
+  end
+end
+
 local function build_turn_refs(thread, selected_turn)
   local checkpoints = thread.checkpoints or {}
   local latest = checkpoints[#checkpoints]
@@ -401,6 +419,130 @@ local function fetch_turn_diff(thread, from_turn, to_turn, client, cache)
   return result, nil
 end
 
+local function read_transition(repo_root, from_ref, to_ref)
+  local entries, err = git.read_raw_diff(repo_root, from_ref, to_ref)
+  if not entries then
+    return nil, err
+  end
+  return {
+    from_ref = from_ref,
+    to_ref = to_ref,
+    entries = entries,
+    index = git.index_raw_entries(entries),
+  }, nil
+end
+
+local function matching_raw_entry(index, entry)
+  if not index or not entry then
+    return nil
+  end
+  return git.find_indexed_entry(index, entry.path) or git.find_indexed_entry(index, entry.old_path)
+end
+
+function M.prepare_combined_context(thread, entries, selected_turn, turn_view_mode, _client, _cache)
+  local refs, err = build_turn_refs(thread, selected_turn)
+  if not refs then
+    return nil, err
+  end
+
+  local selected_transition, selected_err = read_transition(thread.repo_root, refs.from_ref, refs.to_ref)
+  if not selected_transition then
+    return nil, selected_err
+  end
+
+  local context = {
+    refs = refs,
+    selected_transition = selected_transition,
+    transitions = {},
+    blobs = {},
+    files = {},
+  }
+
+  if turn_view_mode ~= "history" then
+    for _, checkpoint in ipairs(list_actual_checkpoints(thread)) do
+      if checkpoint.turnCount > refs.to_turn then
+        local prev_turn = checkpoint.turnCount - 1
+        if prev_turn >= 0 then
+          local prev_ref = get_actual_checkpoint_ref(thread, prev_turn)
+          if not prev_ref then
+            return nil, string.format("checkpoint %d is unavailable", prev_turn)
+          end
+          local transition, transition_err = read_transition(thread.repo_root, prev_ref, checkpoint.actualCheckpointRef)
+          if not transition then
+            return nil, transition_err
+          end
+          transition.turn_count = checkpoint.turnCount
+          context.transitions[#context.transitions + 1] = transition
+        end
+      end
+    end
+  end
+
+  local oid_set = {}
+  local oids = {}
+  for _, entry in ipairs(entries or {}) do
+    local raw_entry = matching_raw_entry(selected_transition.index, entry)
+    local file_context = {
+      entry = entry,
+      selected = raw_entry,
+      steps = {},
+      final_path = entry.path,
+    }
+
+    if not raw_entry then
+      file_context.load_error = "failed to locate file in selected checkpoint diff"
+    else
+      file_context.before_oid = raw_entry.status == "A" and nil or raw_entry.old_oid
+      file_context.after_oid = raw_entry.status == "D" and nil or raw_entry.new_oid
+      file_context.final_path = raw_entry.path or entry.path
+      file_context.latest_oid = file_context.after_oid
+      add_oid(oid_set, oids, file_context.before_oid)
+      add_oid(oid_set, oids, file_context.after_oid)
+
+      if turn_view_mode ~= "history" then
+        local current_path = file_context.final_path
+        for _, transition in ipairs(context.transitions) do
+          local matched = git.find_indexed_entry(transition.index, current_path)
+          if matched then
+            local step = {
+              status = matched.status,
+              old_path = matched.old_path,
+              path = matched.path,
+              old_oid = matched.status == "A" and nil or matched.old_oid,
+              new_oid = matched.status == "D" and nil or matched.new_oid,
+            }
+            file_context.steps[#file_context.steps + 1] = step
+            file_context.final_path = step.path or current_path
+            file_context.latest_oid = step.new_oid
+            current_path = file_context.final_path
+            add_oid(oid_set, oids, step.old_oid)
+            add_oid(oid_set, oids, step.new_oid)
+          end
+        end
+
+        add_oid(oid_set, oids, file_context.latest_oid)
+        file_context.source_path = current_abs_path(thread.repo_root, file_context.final_path)
+        if vim.fn.filereadable(file_context.source_path) ~= 1 and vim.fn.bufnr(file_context.source_path) == -1 then
+          file_context.load_error = "current file is unavailable"
+        else
+          file_context.current_lines, file_context.current_bufnr =
+            git.read_current_lines(file_context.source_path, { load_unloaded_buffer = false })
+        end
+      end
+    end
+
+    context.files[entry_key(entry)] = file_context
+  end
+
+  local blobs, blobs_err = git.read_blobs(thread.repo_root, oids)
+  if not blobs then
+    return nil, blobs_err
+  end
+  context.blobs = blobs
+
+  return context, nil
+end
+
 function M.list_files(thread, selected_turn, client, cache)
   local refs, err = build_turn_refs(thread, selected_turn)
   if not refs then
@@ -419,7 +561,31 @@ function M.list_files(thread, selected_turn, client, cache)
   return entries, nil
 end
 
-function M.build_history_view(thread, entry, selected_turn)
+function M.build_history_view(thread, entry, selected_turn, context)
+  if context then
+    local file_context = context.files and context.files[entry_key(entry)]
+    if not file_context then
+      return nil, "failed to locate prepared projection context"
+    end
+    if file_context.load_error then
+      return nil, file_context.load_error
+    end
+
+    return {
+      mode = "t3code",
+      git_root = thread.repo_root,
+      original_path = entry.old_path or entry.path,
+      modified_path = entry.path,
+      original_revision = context.refs.from_ref,
+      modified_revision = context.refs.to_ref,
+      original_content_lines = blob_lines(context, file_context.before_oid),
+      modified_content_lines = blob_lines(context, file_context.after_oid),
+      t3code_data = {
+        readonly_modified = true,
+      },
+    }, nil
+  end
+
   local refs, err = build_turn_refs(thread, selected_turn)
   if not refs then
     return nil, err
@@ -455,7 +621,50 @@ function M.build_history_view(thread, entry, selected_turn)
   }, nil
 end
 
-function M.build_live_view(thread, entry, selected_turn, client, cache)
+function M.build_live_view(thread, entry, selected_turn, client, cache, context)
+  if context then
+    local file_context = context.files and context.files[entry_key(entry)]
+    if not file_context then
+      return nil, "failed to locate prepared projection context"
+    end
+    if file_context.load_error then
+      return nil, file_context.load_error
+    end
+
+    local before_lines = blob_lines(context, file_context.before_oid)
+    local after_lines = blob_lines(context, file_context.after_oid)
+    local segments = seed_segments(before_lines, after_lines)
+    for _, step in ipairs(file_context.steps or {}) do
+      local step_before_lines = blob_lines(context, step.old_oid)
+      local step_after_lines = blob_lines(context, step.new_oid)
+      local computed = git.compute_diff(step_before_lines, step_after_lines)
+      segments = transform_segments(segments, computed.changes or {})
+    end
+
+    local latest_lines = blob_lines(context, file_context.latest_oid)
+    local current_lines = file_context.current_lines or {}
+    local final_diff = git.compute_diff(latest_lines, current_lines)
+    segments = transform_segments(segments, final_diff.changes or {})
+    local synthetic_original = build_synthetic_original(current_lines, segments)
+
+    return {
+      mode = "t3code",
+      git_root = thread.repo_root,
+      original_path = file_context.final_path,
+      modified_path = file_context.final_path,
+      original_revision = "T3CODE",
+      modified_revision = nil,
+      original_content_lines = synthetic_original,
+      modified_content_lines = current_lines,
+      modified_bufnr = file_context.current_bufnr,
+      source_path = file_context.source_path,
+      t3code_data = {
+        readonly_modified = false,
+        current_path = file_context.final_path,
+      },
+    }, nil
+  end
+
   local refs, err = build_turn_refs(thread, selected_turn)
   if not refs then
     return nil, err
@@ -571,7 +780,7 @@ local function combined_projection_cache_key(thread, entry, selected_turn, turn_
   }, "::")
 end
 
-function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache)
+function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache, context)
   local projection_key = combined_projection_cache_key(thread, entry, selected_turn, turn_view_mode)
   if projection_cache and projection_cache[projection_key] and not projection_cache[projection_key].load_error then
     return util.deepcopy(projection_cache[projection_key]), nil
@@ -579,9 +788,9 @@ function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, cli
 
   local session_config, err
   if turn_view_mode == "history" then
-    session_config, err = M.build_history_view(thread, entry, selected_turn)
+    session_config, err = M.build_history_view(thread, entry, selected_turn, context)
   else
-    session_config, err = M.build_live_view(thread, entry, selected_turn, client, cache)
+    session_config, err = M.build_live_view(thread, entry, selected_turn, client, cache, context)
   end
   if not session_config then
     return {
@@ -617,7 +826,8 @@ function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, cli
       )
       or {},
     modified_bufnr = session_config.modified_bufnr,
-    editable = session_config.modified_bufnr ~= nil and turn_view_mode ~= "history",
+    source_path = session_config.source_path,
+    editable = (session_config.modified_bufnr ~= nil or session_config.source_path ~= nil) and turn_view_mode ~= "history",
     readonly_reason = turn_view_mode == "history" and "t3code history sections are readonly" or nil,
   }
 
@@ -628,9 +838,14 @@ function M.build_combined_file(thread, entry, selected_turn, turn_view_mode, cli
 end
 
 function M.build_combined_files(thread, entries, selected_turn, turn_view_mode, client, cache, projection_cache)
+  local context, context_err = M.prepare_combined_context(thread, entries, selected_turn, turn_view_mode, client, cache)
+  if not context then
+    return nil, context_err
+  end
+
   local files = {}
   for _, entry in ipairs(entries or {}) do
-    local file, err = M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache)
+    local file, err = M.build_combined_file(thread, entry, selected_turn, turn_view_mode, client, cache, projection_cache, context)
     if not file then
       return nil, err
     end

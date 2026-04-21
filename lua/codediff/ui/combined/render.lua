@@ -425,27 +425,39 @@ function M.mirror_diagnostics(bufnr, state)
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, M.ns_diag, 0, -1)
+  local rows_by_source = {}
   for row, map in pairs(state.line_map or {}) do
     if map.type == "content" and map.source_bufnr and vim.api.nvim_buf_is_valid(map.source_bufnr) then
-      local diagnostics = vim.diagnostic.get(map.source_bufnr, { lnum = map.modified_line - 1 })
-      for _, diagnostic in ipairs(diagnostics) do
-        local hl = "DiagnosticUnderlineInfo"
-        if diagnostic.severity == vim.diagnostic.severity.ERROR then
-          hl = "DiagnosticUnderlineError"
-        elseif diagnostic.severity == vim.diagnostic.severity.WARN then
-          hl = "DiagnosticUnderlineWarn"
-        elseif diagnostic.severity == vim.diagnostic.severity.HINT then
-          hl = "DiagnosticUnderlineHint"
+      local lnum = map.modified_line - 1
+      rows_by_source[map.source_bufnr] = rows_by_source[map.source_bufnr] or {}
+      rows_by_source[map.source_bufnr][lnum] = rows_by_source[map.source_bufnr][lnum] or {}
+      rows_by_source[map.source_bufnr][lnum][#rows_by_source[map.source_bufnr][lnum] + 1] = row
+    end
+  end
+
+  for source_bufnr, rows_by_lnum in pairs(rows_by_source) do
+    local diagnostics = vim.diagnostic.get(source_bufnr)
+    for _, diagnostic in ipairs(diagnostics) do
+      local rows = rows_by_lnum[diagnostic.lnum]
+      if rows then
+        for _, row in ipairs(rows) do
+          local hl = "DiagnosticUnderlineInfo"
+          if diagnostic.severity == vim.diagnostic.severity.ERROR then
+            hl = "DiagnosticUnderlineError"
+          elseif diagnostic.severity == vim.diagnostic.severity.WARN then
+            hl = "DiagnosticUnderlineWarn"
+          elseif diagnostic.severity == vim.diagnostic.severity.HINT then
+            hl = "DiagnosticUnderlineHint"
+          end
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_diag, row - 1, diagnostic.col or 0, {
+            end_col = diagnostic.end_col,
+            hl_group = hl,
+            virt_text = { { diagnostic.message or "", "DiagnosticVirtualTextInfo" } },
+            virt_text_pos = "eol",
+          })
         end
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns_diag, row - 1, diagnostic.col or 0, {
-          end_col = diagnostic.end_col,
-          hl_group = hl,
-          virt_text = { { diagnostic.message or "", "DiagnosticVirtualTextInfo" } },
-          virt_text_pos = "eol",
-        })
       end
     end
   end
 end
-
 return M
