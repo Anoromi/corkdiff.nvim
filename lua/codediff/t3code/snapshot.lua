@@ -77,6 +77,14 @@ local function normalize_thread(thread, projects_by_id)
     title = thread.title,
     projectId = thread.projectId,
     branch = coerce_nil(thread.branch),
+    forkOrigin = not is_json_null(thread.forkOrigin)
+        and {
+          sourceThreadId = coerce_nil(thread.forkOrigin.sourceThreadId),
+          sourceTurnId = coerce_nil(thread.forkOrigin.sourceTurnId),
+          sourceCheckpointTurnCount = coerce_nil(thread.forkOrigin.sourceCheckpointTurnCount),
+          forkedAt = coerce_nil(thread.forkOrigin.forkedAt),
+        }
+      or nil,
     worktreePath = worktree_path,
     updatedAt = thread.updatedAt,
     archivedAt = coerce_nil(thread.archivedAt),

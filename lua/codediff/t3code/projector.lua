@@ -229,7 +229,11 @@ local function get_checkpoint(thread, turn_count)
 end
 
 local function get_baseline_ref(thread)
-  return git.checkpoint_ref_for_turn(thread.id, 0)
+  local baseline_thread_id = thread.id
+  if thread.forkOrigin and thread.forkOrigin.sourceThreadId then
+    baseline_thread_id = thread.forkOrigin.sourceThreadId
+  end
+  return git.checkpoint_ref_for_turn(baseline_thread_id, 0)
 end
 
 local function get_visible_checkpoint_ref(checkpoint)
